@@ -131,6 +131,32 @@ type InterpolCoeffs2D
         !+ Coefficient for z(i+1,j+1) term
 end type InterpolCoeffs2D
 
+type InterpolCoeffs3D
+    !+ 3D Cylindrical Interpolation Coefficients and indices
+    integer :: i = 0
+        !+ Index of R before `xout`
+    integer :: j = 0
+        !+ Index of phi before `yout`
+    integer :: k = 0
+        !+ Index of Z before `zout`
+    real(Float64) :: b111 = 0.d0
+        !+ Coefficient for z(i,j,k) term
+    real(Float64) :: b121 = 0.d0
+        !+ Coefficient for z(i,j+1,k) term
+    real(Float64) :: b112 = 0.d0
+        !+ Coefficient for z(i,j,k+1) term
+    real(Float64) :: b122 = 0.d0
+        !+ Coefficient for z(i,j+1,k+1) term
+    real(Float64) :: b211 = 0.d0
+        !+ Coefficient for z(i+1,j,k) term
+    real(Float64) :: b212 = 0.d0
+        !+ Coefficient for z(i+1,j,k+1) term
+    real(Float64) :: b221 = 0.d0
+        !+ Coefficient for z(i+1,j+1,k) term
+    real(Float64) :: b222 = 0.d0
+        !+ Coefficient for z(i+1,j+1,k+1) term
+end type InterpolCoeffs3D
+
 type BeamGrid
     !+ Defines a 3D grid for neutral beam calculations
     integer(Int32) :: nx
@@ -191,21 +217,29 @@ type BeamGrid
 end type BeamGrid
 
 type InterpolationGrid
-    !+ Defines a 2D R-Z grid for interpolating plasma parameters and fields
+    !+ Defines a 3D R-Z-phi grid for interpolating plasma parameters and fields
     integer(Int32) :: nr
         !+ Number of Radii
+    integer(Int32) :: nphi
+        !+ Number of phi values
     integer(Int32) :: nz
         !+ Number of Z values
     real(Float64)  :: dr
         !+ Radial spacing [cm]
+    real(Float64)  :: dphi
+        !+ Angular spacing [rad]
     real(Float64)  :: dz
         !+ Vertical spacing [cm]
     real(Float64)  :: da
         !+ Grid element area [\(cm^2\)]
+    real(Float64), dimension(:,:,:),   allocatable :: dv
+        !+ Cell volumes [\(cm^3\)]
     integer(Int32) :: dims(2)
         !+ Dimension of the interpolation grid
     real(Float64), dimension(:),   allocatable :: r
         !+ Radii values [cm]
+    real(Float64), dimension(:),   allocatable :: phi
+        !+ Angular values [rad]
     real(Float64), dimension(:),   allocatable :: z
         !+ Z values [cm]
     real(Float64), dimension(:,:), allocatable :: r2d
@@ -254,6 +288,8 @@ type, extends( Profiles ) :: LocalProfiles
         !+ Plasma rotation in beam grid coordinates
     type(InterpolCoeffs2D) :: c
         !+ Linear Interpolation Coefficients and indicies for interpolation at `pos`
+    type(InterpolCoeffs3D) :: b
+        !+ Cylindrical Interpolation Coefficients and indicies for interpolation at `pos`
 end type LocalProfiles
 
 type EMFields
@@ -308,6 +344,8 @@ type, extends( EMFields ) :: LocalEMFields
         !+ Direction of electric field in beam grid coordinates
     type(InterpolCoeffs2D) :: c
         !+ Linear Interpolation Coefficients and indicies for interpolation at `pos`
+    type(InterpolCoeffs3D) :: b
+        !+ Cylindrical Interpolation Coefficients and indicies for interpolation at `pos`
 end type LocalEMFields
 
 type Equilibrium
@@ -336,6 +374,8 @@ type FastIonDistribution
         !+ Pitch spacing
     real(Float64)  :: dr
         !+ Radial spacing [cm]
+    real(Float64)  :: dphi
+        !+ Angular spacing [rad]
     real(Float64)  :: dz
         !+ Z spacing [cm]
     real(Float64)  :: emin
@@ -358,6 +398,8 @@ type FastIonDistribution
         !+ Pitch w.r.t. the magnetic field
     real(Float64), dimension(:), allocatable       :: r
         !+ Radius [cm]
+    real(Float64), dimension(:), allocatable       :: phi
+        !+ Angles [rad]
     real(Float64), dimension(:), allocatable       :: z
         !+ Z [cm]
     real(Float64), dimension(:,:), allocatable     :: denf
@@ -998,6 +1040,13 @@ interface interpol_coeff
     !+ Calculates linear interpolation coefficients
     module procedure interpol1D_coeff, interpol1D_coeff_arr
     module procedure interpol2D_coeff, interpol2D_coeff_arr
+end interface
+
+interface cyl_interpol_coeff
+    !+ Calculates 3-D cylindrical interpolation coefficients
+!!# Not sure if I need any 1D stuff
+!!    module procedure interpol1D_coeff, interpol1D_coeff_arr
+    module procedure cyl_interpol3D_coeff, cyl_interpol3D_coeff_arr
 end interface
 
 interface interpol
@@ -5698,6 +5747,114 @@ subroutine interpol2D_coeff_arr(x,y,xout,yout,c,err)
 
 end subroutine interpol2D_coeff_arr
 
+subroutine cyl_interpol3D_coeff(xmin,dx,nx,ymin,dy,ny,zmin,dz,nz,xout,yout,zout,c,err)
+    !+ Bilinear interpolation coefficients and indicies for a 2D grid z(x,y)
+    real(Float64), intent(in)           :: xmin
+        !+ Minimum R 
+    real(Float64), intent(in)           :: dx
+        !+ R spacing
+    integer, intent(in)                 :: nx
+        !+ Number of R points 
+    real(Float64), intent(in)           :: ymin
+        !+ Minimum phi 
+    real(Float64), intent(in)           :: dy
+        !+ Phi spacing
+    integer, intent(in)                 :: ny
+        !+ Number of phi points
+    real(Float64), intent(in)           :: zmin
+        !+ Minimum Z 
+    real(Float64), intent(in)           :: dz
+        !+ Z spacing
+    integer, intent(in)                 :: nz
+        !+ Number of Z points
+    real(Float64), intent(in)           :: xout
+        !+ R value to interpolate
+    real(Float64), intent(in)           :: yout
+        !+ Phi value to interpolate
+    real(Float64), intent(in)           :: zout
+        !+ Z value to interpolate
+    type(InterpolCoeffs3D), intent(out) :: c
+        !+ Interpolation Coefficients
+    integer, intent(out), optional      :: err
+        !+ Error code
+
+!!# Now I need to change some hardcoding below for the interpolation
+    real(Float64) :: x1, x2, y1, y2, z1, z2, xp, yp, zp
+    integer :: i, j, k, err_status
+
+    err_status = 1
+    xp = max(xout,xmin)
+    yp = max(yout,ymin)
+    zp = max(zout,zmin)
+    i = floor((xp-xmin)/dx)+1
+    j = floor((yp-ymin)/dy)+1
+    k = floor((zp-zmin)/dz)+1
+
+    if ((((i.gt.0).and.(i.le.(nx-1))).and.((j.gt.0).and.(j.le.(ny-1)))).and.((k.gt.0).and.(k.le.(nz-1)))) then
+        x1 = xmin + (i-1)*dx
+        x2 = x1 + dx
+        y1 = ymin + (j-1)*dy
+        y2 = y1 + dy
+        z1 = zmin + (k-1)*dz
+        z2 = z1 + dz
+
+        c%b111 = ((x2**2 - xp**2) * (y2 - yp) * (z2 - zp))/(r*dx*dy*dz)
+        c%b112 = ((x2**2 - xp**2) * (y2 - yp) * (zp - z1))/(r*dx*dy*dz)
+        c%b212 = ((xp**2 - x1**2) * (y2 - yp) * (zp - z1))/(r*dx*dy*dz)
+        c%b211 = ((xp**2 - x1**2) * (y2 - yp) * (z2 - zp))/(r*dx*dy*dz)
+        c%b221 = ((xp**2 - x1**2) * (yp - y1) * (z2 - zp))/(r*dx*dy*dz)
+        c%b222 = ((xp**2 - x1**2) * (yp - y1) * (zp - z1))/(r*dx*dy*dz)
+        c%b122 = ((x2**2 - xp**2) * (yp - y1) * (zp - z1))/(r*dx*dy*dz)
+        c%b121 = ((x2**2 - xp**2) * (yp - y1) * (z2 - zp))/(r*dx*dy*dz)
+        c%i = i
+        c%j = j
+        c%k = k
+        err_status = 0
+    endif
+
+    if(present(err)) err = err_status
+
+end subroutine cyl_interpol3D_coeff
+
+subroutine cyl_interpol3D_coeff_arr(x,y,z,xout,yout,zout,c,err)
+    !!Bilinear interpolation coefficients and indicies for a 2D grid z(x,y)
+    real(Float64), dimension(:), intent(in) :: x
+        !+ R values
+    real(Float64), dimension(:), intent(in) :: y
+        !+ Phi values
+    real(Float64), dimension(:), intent(in) :: z
+        !+ Z values
+    real(Float64), intent(in)               :: xout
+        !+ X value to interpolate
+    real(Float64), intent(in)               :: yout
+        !+ Phi value to interpolate
+    real(Float64), intent(in)               :: zout
+        !+ Z value to interpolate
+    type(InterpolCoeffs3D), intent(out)     :: c
+        !+ Interpolation Coefficients
+    integer, intent(out), optional          :: err
+        !+ Error code
+
+    real(Float64) :: xmin, ymin, zmin, dx, dy, dz
+    integer :: sx, sy, sz, err_status
+
+    err_status = 1
+    sx = size(x)
+    sy = size(y)
+    sz = size(z)
+    xmin = x(1)
+    ymin = y(1)
+    zmin = z(1)
+    dx = abs(x(2)-x(1))
+    dy = abs(y(2)-y(1))
+    dz = abs(z(2)-z(1))
+
+    call cyl_interpol3D_coeff(xmin, dx, sx, ymin, dy, sy, zmin, dz, sz, xout, yout, zout, c, err_status)
+
+    if(present(err)) err = err_status
+
+end subroutine cyl_interpol3D_coeff_arr
+
 subroutine interpol1D_arr(x, y, xout, yout, err, coeffs)
     !+ Performs linear interpolation on a uniform 1D grid y(x)
     real(Float64), dimension(:), intent(in)      :: x
@@ -5822,7 +5979,7 @@ end subroutine interpol2D_2D_arr
 !=============================================================================
 !-------------------------Profiles and Fields Routines------------------------
 !=============================================================================
-subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
+subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out, cyl_interpol)
     !+ Indicator subroutine to determine if a position is in a region where
     !+ the plasma parameter and fields are valid/known
     real(Float64), dimension(3), intent(in) :: xyz
@@ -5831,6 +5988,8 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         !+ Indicates whether plasma parameters and fields are valid/known
     logical, intent(in), optional           :: machine_coords
         !+ Indicates that xyz is in machine coordinates
+    logical, intent(in), optional           :: cyl_interpol
+        !+ Indicates that cylindrical interpolation is desired
     type(InterpolCoeffs2D), intent(out), optional      :: coeffs
         !+ Linear Interpolation coefficients used in calculation
     real(Float64), dimension(3), intent(out), optional :: uvw_out
@@ -5838,27 +5997,49 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
 
     real(Float64), dimension(3) :: uvw
     type(InterpolCoeffs2D) :: c
-    real(Float64) :: R, W, mask
+    type(InterpolCoeffs3D) :: b
+    real(Float64) :: R, phi, W, mask
     logical :: mc
+    logical :: ci
     integer :: i, j, err
 
     err = 1
     mc = .False.
     if(present(machine_coords)) mc = machine_coords
+    ci = .False.
+    if(present(cyl_interpol)) ci = cyl_interpol
 
     if(mc) then
         uvw = xyz
     else
+!!# Here the program converts plasma point to machine coordinates
         !! Convert to machine coordinates
         call xyz_to_uvw(xyz,uvw)
     endif
 
+!!# Below is the radial vector made from x and y machine coord
     R = sqrt(uvw(1)*uvw(1) + uvw(2)*uvw(2))
+!!# Below is the altitude of the device in machine coord
     W = uvw(3)
-
+!!# Below is the angular coordinate of the device in machine coord
+    phi = atan2(uvw(2),uvw(1))
     !! Interpolate mask value
-    call interpol_coeff(inter_grid%r, inter_grid%z, R, W, c, err)
+!!# Here there is some interpolating going on. Probably need to change some of
+!!# for the phi direction.
+!!# Need to figure out which interpolation routine this one is calling
+    if(ci) then
+!!# NEED TO MAKE SOMETHING OF THIS BELOW
+        call cyl_interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
+    else
+        call interpol_coeff(inter_grid%r, inter_grid%z, R, W, c, err)
+    endif
 
+!!# After getting the interpolation coefficients, use them below for mask
+!!# values.
+!!#
+!!# Below is the check to see if the profile is within the plasma. It uses the
+!!# coefficients from the previous call and something called mask. If the sum is
+!!# greater than 0.5, then it's within the plasma. else the default value is F
     inp = .False.
     if(err.eq.0) then
         i = c%i
@@ -5871,6 +6052,8 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         endif
     endif
 
+!!# If the user wants the coeffients from the calculation, than it is output.
+!!# the machine coordinates are also output.
     if(present(coeffs)) coeffs = c
     if(present(uvw_out)) uvw_out = uvw
 
@@ -5888,6 +6071,7 @@ subroutine get_plasma(plasma, pos, ind)
     logical :: inp
     type(InterpolCoeffs2D) :: coeffs
     real(Float64), dimension(3) :: xyz, uvw, vrot_uvw
+    !!# machine = uvw, beam = xyz
     real(Float64) :: phi, s, c
     integer :: i, j
 
@@ -5896,12 +6080,21 @@ subroutine get_plasma(plasma, pos, ind)
     if(present(ind)) call get_position(ind,xyz)
     if(present(pos)) xyz = pos
 
+    !!# When get plasma is called, it is assumed that the coord = beam
+    !!# The call below will check if xyz is in plasma, output true if so,
+    !!# provide linear interpolation, and give the position in machine coord
+!!# latter two still confusing
     call in_plasma(xyz,inp,.False.,coeffs,uvw)
+!!# After in_plasma successfully runs, the below routine executes if the profile
+!!# is within the plasma.
     if(inp) then
         phi = atan2(uvw(2),uvw(1))
         i = coeffs%i
         j = coeffs%j
 
+!!# Use the coefficients from in_plasma to get the plasma at that point.
+!!# Probably need to change things below for the third dimension
+!!# stuff
         plasma = coeffs%b11*equil%plasma(i,j)   + coeffs%b12*equil%plasma(i,j+1) + &
                  coeffs%b21*equil%plasma(i+1,j) + coeffs%b22*equil%plasma(i+1,j+1)
 

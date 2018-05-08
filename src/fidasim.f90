@@ -1044,8 +1044,6 @@ end interface
 
 interface cyl_interpol_coeff
     !+ Calculates 3-D cylindrical interpolation coefficients
-!!# Not sure if I need any 1D stuff
-!!    module procedure interpol1D_coeff, interpol1D_coeff_arr
     module procedure cyl_interpol3D_coeff, cyl_interpol3D_coeff_arr
 end interface
 
@@ -5747,19 +5745,20 @@ subroutine interpol2D_coeff_arr(x,y,xout,yout,c,err)
 
 end subroutine interpol2D_coeff_arr
 
-subroutine cyl_interpol3D_coeff(xmin,dx,nx,ymin,dy,ny,zmin,dz,nz,xout,yout,zout,c,err)
-    !+ Bilinear interpolation coefficients and indicies for a 2D grid z(x,y)
-    real(Float64), intent(in)           :: xmin
+subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phiout,zout,c,err)
+    !!! z(x,y) below confusing
+    !+ Cylindrical interpolation coefficients and indicies for a 3D grid ?z(x,y)
+    real(Float64), intent(in)           :: rmin
         !+ Minimum R 
-    real(Float64), intent(in)           :: dx
+    real(Float64), intent(in)           :: dr
         !+ R spacing
-    integer, intent(in)                 :: nx
+    integer, intent(in)                 :: nr
         !+ Number of R points 
-    real(Float64), intent(in)           :: ymin
+    real(Float64), intent(in)           :: phimin
         !+ Minimum phi 
-    real(Float64), intent(in)           :: dy
+    real(Float64), intent(in)           :: dphi
         !+ Phi spacing
-    integer, intent(in)                 :: ny
+    integer, intent(in)                 :: nphi
         !+ Number of phi points
     real(Float64), intent(in)           :: zmin
         !+ Minimum Z 
@@ -5767,9 +5766,9 @@ subroutine cyl_interpol3D_coeff(xmin,dx,nx,ymin,dy,ny,zmin,dz,nz,xout,yout,zout,
         !+ Z spacing
     integer, intent(in)                 :: nz
         !+ Number of Z points
-    real(Float64), intent(in)           :: xout
+    real(Float64), intent(in)           :: rout
         !+ R value to interpolate
-    real(Float64), intent(in)           :: yout
+    real(Float64), intent(in)           :: phiout
         !+ Phi value to interpolate
     real(Float64), intent(in)           :: zout
         !+ Z value to interpolate
@@ -5778,34 +5777,46 @@ subroutine cyl_interpol3D_coeff(xmin,dx,nx,ymin,dy,ny,zmin,dz,nz,xout,yout,zout,
     integer, intent(out), optional      :: err
         !+ Error code
 
-!!# Now I need to change some hardcoding below for the interpolation
-    real(Float64) :: x1, x2, y1, y2, z1, z2, xp, yp, zp
+    real(Float64) :: r1, r2, phi1, phi2, z1, z2, rp, phip, zp, dV
+    real(Float64) :: phi
     integer :: i, j, k, err_status
 
+    !! Bound phiout between 0 and 2*pi
+    phi = phiout
+    do while (phi .gt. 2*pi)
+        phi = phi - 2*pi
+    enddo
+
+    do while (phi .lt. 0.0)
+        phi = phi + 2*pi
+    enddo
+    
     err_status = 1
-    xp = max(xout,xmin)
-    yp = max(yout,ymin)
+    rp = max(rout,rmin)
+    phip = max(phi,phimin)
     zp = max(zout,zmin)
-    i = floor((xp-xmin)/dx)+1
-    j = floor((yp-ymin)/dy)+1
+    i = floor((rp-rmin)/dr)+1
+    j = floor((phip-phimin)/dphi)+1
     k = floor((zp-zmin)/dz)+1
 
-    if ((((i.gt.0).and.(i.le.(nx-1))).and.((j.gt.0).and.(j.le.(ny-1)))).and.((k.gt.0).and.(k.le.(nz-1)))) then
-        x1 = xmin + (i-1)*dx
-        x2 = x1 + dx
-        y1 = ymin + (j-1)*dy
-        y2 = y1 + dy
+!!! I should double check this if condition at some point
+    if ((((i.gt.0).and.(i.le.(nr-1))).and.((j.gt.0).and.(j.le.(nphi-1)))).and.((k.gt.0).and.(k.le.(nz-1)))) then
+        r1 = rmin + (i-1)*dr
+        r2 = r1 + dr
+        phi1 = phimin + (j-1)*dphi
+        phi2 = phi1 + dphi
         z1 = zmin + (k-1)*dz
         z2 = z1 + dz
+        dV = ((r2**2 - r1**2) * (phi2 - phi1) * (z2 - z1)) / 2
 
-        c%b111 = ((x2**2 - xp**2) * (y2 - yp) * (z2 - zp))/(r*dx*dy*dz)
-        c%b112 = ((x2**2 - xp**2) * (y2 - yp) * (zp - z1))/(r*dx*dy*dz)
-        c%b212 = ((xp**2 - x1**2) * (y2 - yp) * (zp - z1))/(r*dx*dy*dz)
-        c%b211 = ((xp**2 - x1**2) * (y2 - yp) * (z2 - zp))/(r*dx*dy*dz)
-        c%b221 = ((xp**2 - x1**2) * (yp - y1) * (z2 - zp))/(r*dx*dy*dz)
-        c%b222 = ((xp**2 - x1**2) * (yp - y1) * (zp - z1))/(r*dx*dy*dz)
-        c%b122 = ((x2**2 - xp**2) * (yp - y1) * (zp - z1))/(r*dx*dy*dz)
-        c%b121 = ((x2**2 - xp**2) * (yp - y1) * (z2 - zp))/(r*dx*dy*dz)
+        c%b111 = ((r2**2 - rp**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
+        c%b112 = ((r2**2 - rp**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
+        c%b212 = ((rp**2 - r1**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
+        c%b211 = ((rp**2 - r1**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
+        c%b221 = ((rp**2 - r1**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
+        c%b222 = ((rp**2 - r1**2) * (phip - phi1) * (zp - z1)) / (dV * 2)
+        c%b122 = ((r2**2 - rp**2) * (phip - phi1) * (zp - z1)) / (dV * 2)
+        c%b121 = ((r2**2 - rp**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
         c%i = i
         c%j = j
         c%k = k
@@ -5816,17 +5827,17 @@ subroutine cyl_interpol3D_coeff(xmin,dx,nx,ymin,dy,ny,zmin,dz,nz,xout,yout,zout,
 
 end subroutine cyl_interpol3D_coeff
 
-subroutine cyl_interpol3D_coeff_arr(x,y,z,xout,yout,zout,c,err)
-    !!Bilinear interpolation coefficients and indicies for a 2D grid z(x,y)
-    real(Float64), dimension(:), intent(in) :: x
+subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
+    !!Cylindrical interpolation coefficients and indicies for a 3D grid ?z(x,y)
+    real(Float64), dimension(:), intent(in) :: r
         !+ R values
-    real(Float64), dimension(:), intent(in) :: y
+    real(Float64), dimension(:), intent(in) :: phi
         !+ Phi values
     real(Float64), dimension(:), intent(in) :: z
         !+ Z values
-    real(Float64), intent(in)               :: xout
-        !+ X value to interpolate
-    real(Float64), intent(in)               :: yout
+    real(Float64), intent(in)               :: rout
+        !+ R value to interpolate
+    real(Float64), intent(in)               :: phiout
         !+ Phi value to interpolate
     real(Float64), intent(in)               :: zout
         !+ Z value to interpolate
@@ -5835,21 +5846,21 @@ subroutine cyl_interpol3D_coeff_arr(x,y,z,xout,yout,zout,c,err)
     integer, intent(out), optional          :: err
         !+ Error code
 
-    real(Float64) :: xmin, ymin, zmin, dx, dy, dz
-    integer :: sx, sy, sz, err_status
-
+    real(Float64) :: rmin, phimin, zmin, dr, dphi, dz
+    integer :: sr, sphi, sz, err_status
+    !!! Do I needd to bound the phi value here?
     err_status = 1
-    sx = size(x)
-    sy = size(y)
+    sr = size(r)
+    sphi = size(phi)
     sz = size(z)
-    xmin = x(1)
-    ymin = y(1)
+    rmin = r(1)
+    phimin = phi(1)
     zmin = z(1)
-    dx = abs(x(2)-x(1))
-    dy = abs(y(2)-y(1))
+    dr = abs(r(2)-r(1))
+    dphi = abs(phi(2)-phi(1))
     dz = abs(z(2)-z(1))
 
-    call cyl_interpol3D_coeff(xmin, dx, sx, ymin, dy, sy, zmin, dz, sz, xout, yout, zout, c, err_status)
+    call cyl_interpol3D_coeff(rmin, dr, sr, phimin, dphi, sphi, zmin, dz, sz, rout, phiout, zout, c, err_status)
 
     if(present(err)) err = err_status
 

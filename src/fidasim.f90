@@ -356,8 +356,8 @@ type Equilibrium
         !+ Electro-magnetic fields at points defined in [[libfida:inter_grid]]
     type(Profiles), dimension(:,:,:), allocatable :: plasma
         !+ Plasma parameters at points defined in [[libfida:inter_grid]]
-!!! Need to change dimensions of mask at some point
-    real(Float64), dimension(:,:), allocatable  :: mask
+!!! Suspicious that this did not break anything. Need to test mask more 
+    real(Float64), dimension(:,:,:), allocatable  :: mask
         !+ Indicates whether fields and plasma are well-defined at points defined in [[libfida:inter_grid]]
 !!! End
 end type Equilibrium
@@ -1046,7 +1046,7 @@ interface interpol_coeff
     module procedure interpol2D_coeff, interpol2D_coeff_arr
 end interface
 
-interface cyl_interpol_coeff
+interface cyl_interpol3D_coeff
     !+ Calculates 3-D cylindrical interpolation coefficients
     module procedure cyl_interpol3D_coeff, cyl_interpol3D_coeff_arr
 end interface
@@ -2560,7 +2560,7 @@ subroutine read_equilibrium
 !!! I definitely need to change things below, but it is currently breaking
 !!!everything so I will worry about this later.
     allocate(p_mask(inter_grid%nr,inter_grid%nz))
-!    allocate(f_mask(inter_grid%nr,inter_grid%nz))
+!@   allocate(f_mask(inter_grid%nr,inter_grid%nz))
     allocate(denn2d(inter_grid%nr,inter_grid%nz))
 !!! End
 
@@ -2674,7 +2674,7 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/fields/er", equil%fields%er, dims, error)
     call h5ltread_dataset_double_f(gid, "/fields/et", equil%fields%et, dims, error)
     call h5ltread_dataset_double_f(gid, "/fields/ez", equil%fields%ez, dims, error)
-!    call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
+!@   call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
     !!Calculate B field derivatives
 !!! More wreckage
@@ -2693,12 +2693,12 @@ subroutine read_equilibrium
     call h5close_f(error)
 
 !!! More wreckage
-    allocate(equil%mask(inter_grid%nr,inter_grid%nz))
+    allocate(equil%mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
 !!! End
     equil%mask = 0.d0
-!    where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
+!@   where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
 !!! Delete stuff below when things are working
-    where (p_mask.eq.1) equil%mask = 1.d0
+!@    where (p_mask.eq.1) equil%mask = 1.d0
 !!! End
     if (sum(equil%mask).le.0.d0) then
         write(*,'(a)') "READ_EQUILIBRIUM: Plasma and/or fields are not well defined anywhere"
@@ -6055,23 +6055,27 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
     W = uvw(3)
     phi = atan2(uvw(2),uvw(1))
     !! Interpolate mask value
-    call cyl_interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
+!!! When I change the interface later on, this will need to change with it
+    call cyl_interpol3D_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
+!!! End
 !@    call interpol_coeff(inter_grid%r, inter_grid%z, R, W, c, err)
 
     inp = .False.
-!@    if(err.eq.0) then
-!@        i = b%i
-!@        j = b%j
-!@        k = b%k
-!!! Need to change stuff about mask to be in 3-D
-!@        mask = b%b11*equil%mask(i,j)   + c%b12*equil%mask(i,j+1) + &
-!@            c%b21*equil%mask(i+1,j) + c%b22*equil%mask(i+1,j+1) 
+    if(err.eq.0) then
+        i = b%i
+        j = b%j
+        k = b%k
+!!! Double check this
+        mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k+1) + &
+            b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k+1) + &
+            b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k+1) + &
+            b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k+1)
 !!! End
 
-!@        if((mask.ge.0.5).and.(err.eq.0)) then
-!@            inp = .True.
-!@        endif
-!@    endif
+        if((mask.ge.0.5).and.(err.eq.0)) then
+            inp = .True.
+        endif
+    endif
 
     if(present(coeffs)) coeffs = b
     if(present(uvw_out)) uvw_out = uvw

@@ -234,7 +234,9 @@ type InterpolationGrid
         !+ Grid element area [\(cm^2\)]
     real(Float64), dimension(:,:,:),   allocatable :: dv
         !+ Cell volumes [\(cm^3\)]
+!!! I will probably need to change this to dims(3)
     integer(Int32) :: dims(2)
+!!! End
         !+ Dimension of the interpolation grid
     real(Float64), dimension(:),   allocatable :: r
         !+ Radii values [cm]
@@ -2523,7 +2525,10 @@ subroutine read_equilibrium
     !+ Reads in the interpolation grid, plasma parameters, and fields
     !+ and stores the quantities in [[libfida:inter_grid]] and [[libfida:equil]]
     integer(HID_T) :: fid, gid
-    integer(HSIZE_T), dimension(2) :: dims
+    integer(HSIZE_T), dimension(2) :: dims 
+!!! Pseudo dims
+    integer(HSIZE_T), dimension(1) :: dimsphi
+!!! End
 
     integer :: impc, ic, ir, iz, it, ind(2)
     type(LocalProfiles) :: plasma
@@ -2550,28 +2555,46 @@ subroutine read_equilibrium
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nz", inter_grid%nz, error)
     inter_grid%dims = [inter_grid%nr, inter_grid%nz]
 
-    allocate(inter_grid%r(inter_grid%nr),inter_grid%z(inter_grid%nz))
+    allocate(inter_grid%r(inter_grid%nr),inter_grid%z(inter_grid%nz),inter_grid%phi(inter_grid%nphi))
     allocate(inter_grid%r2d(inter_grid%nr,inter_grid%nz))
     allocate(inter_grid%z2d(inter_grid%nr,inter_grid%nz))
+!!! I definitely need to change things below, but it is currently breaking
+!!!everything so I will worry about this later.
     allocate(p_mask(inter_grid%nr,inter_grid%nz))
     allocate(f_mask(inter_grid%nr,inter_grid%nz))
     allocate(denn2d(inter_grid%nr,inter_grid%nz))
+!!! End
 
+!!! Also breaking things
+!!!     Furthermore, should nphi be second or third element?
     dims = [inter_grid%nr, inter_grid%nz]
+!!! End
+
+!!! Making a pseudo dims to make things compile
+    dimsphi = [inter_grid%nphi]
+!!! End
+
+!!! Not sure how dims is being indexed below
     call h5ltread_dataset_double_f(gid, "/plasma/r", inter_grid%r, dims(1:1), error)
+    call h5ltread_dataset_double_f(gid, "/plasma/phi", inter_grid%phi, dims(1:1), error)
     call h5ltread_dataset_double_f(gid, "/plasma/z", inter_grid%z, dims(2:2), error)
     call h5ltread_dataset_double_f(gid, "/plasma/r2d", inter_grid%r2d, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/z2d", inter_grid%z2d, dims, error)
 
     inter_grid%dr = abs(inter_grid%r(2)-inter_grid%r(1))
+    inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
     inter_grid%dz = abs(inter_grid%z(2)-inter_grid%z(1))
     inter_grid%da = inter_grid%dr*inter_grid%dz
 
     if(inputs%verbose.ge.1) then
         write(*,'(a)') '---- Interpolation grid settings ----'
         write(*,'(T2,"Nr: ",i3)') inter_grid%nr
+        write(*,'(T2,"Nphi: ",i3)') inter_grid%nphi
         write(*,'(T2,"Nz: ",i3)') inter_grid%nz
+!!! Perhaps the da is redundant now
         write(*,'(T2,"dA: ", f5.2," [cm^2]")') inter_grid%da
+!!! End
+        write(*,'(T2,"dV: ", f5.2," [cm^3]")') inter_grid%dv
         write(*,*) ''
     endif
 
@@ -2616,6 +2639,7 @@ subroutine read_equilibrium
     equil%plasma%denimp = ((equil%plasma%zeff-1.d0)/(impc*(impc-1.d0)))*equil%plasma%dene
     equil%plasma%denp = equil%plasma%dene - impc*equil%plasma%denimp
 
+!!! This loop is going to get completely wrecked.
     loop_over_cells: do ic=1, inter_grid%nr*inter_grid%nz
         call ind2sub(inter_grid%dims,ic,ind)
         ir = ind(1) ; iz = ind(2)
@@ -2636,6 +2660,7 @@ subroutine read_equilibrium
         if(sum(rates_avg).le.0.0) cycle loop_over_cells
         equil%plasma(ir,iz)%denn = denn2d(ir,iz)*(rates_avg)/sum(rates_avg)
     enddo loop_over_cells
+!!! End
 
     !!Close PLASMA group
     call h5gclose_f(gid, error)
@@ -2643,7 +2668,9 @@ subroutine read_equilibrium
     !!Open FIELDS group
     call h5gopen_f(fid, "/fields", gid, error)
 
+!!! More wreckage
     allocate(equil%fields(inter_grid%nr,inter_grid%nz))
+!!! End
 
     !!Read in electromagnetic fields
     call h5ltread_dataset_double_f(gid, "/fields/br", equil%fields%br, dims, error)
@@ -2655,9 +2682,11 @@ subroutine read_equilibrium
     call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
     !!Calculate B field derivatives
+!!! More wreckage
     call deriv(inter_grid%r, inter_grid%z, equil%fields%br, equil%fields%dbr_dr, equil%fields%dbr_dz)
     call deriv(inter_grid%r, inter_grid%z, equil%fields%bt, equil%fields%dbt_dr, equil%fields%dbt_dz)
     call deriv(inter_grid%r, inter_grid%z, equil%fields%bz, equil%fields%dbz_dr, equil%fields%dbz_dz)
+!!! End
 
     !!Close FIELDS group
     call h5gclose_f(gid, error)
@@ -2668,7 +2697,9 @@ subroutine read_equilibrium
     !!Close HDF5 interface
     call h5close_f(error)
 
+!!! More wreckage
     allocate(equil%mask(inter_grid%nr,inter_grid%nz))
+!!! End
     equil%mask = 0.d0
     where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
     if (sum(equil%mask).le.0.d0) then

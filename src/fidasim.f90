@@ -235,7 +235,7 @@ type InterpolationGrid
     real(Float64), dimension(:,:,:),   allocatable :: dv
         !+ Cell volumes [\(cm^3\)]
 !!! I will probably need to change this to dims(3)
-    integer(Int32) :: dims(2)
+    integer(Int32) :: dims(3)
 !!! End
         !+ Dimension of the interpolation grid
     real(Float64), dimension(:),   allocatable :: r
@@ -351,13 +351,15 @@ type, extends( EMFields ) :: LocalEMFields
 end type LocalEMFields
 
 type Equilibrium
-    !+MHD Equilbrium
+    !+MHD Equilbrium 
     type(EMFields), dimension(:,:), allocatable :: fields
         !+ Electro-magnetic fields at points defined in [[libfida:inter_grid]]
-    type(Profiles), dimension(:,:), allocatable :: plasma
+    type(Profiles), dimension(:,:,:), allocatable :: plasma
         !+ Plasma parameters at points defined in [[libfida:inter_grid]]
+!!! Need to change dimensions of mask at some point
     real(Float64), dimension(:,:), allocatable  :: mask
         !+ Indicates whether fields and plasma are well-defined at points defined in [[libfida:inter_grid]]
+!!! End
 end type Equilibrium
 
 type FastIonDistribution
@@ -2525,10 +2527,7 @@ subroutine read_equilibrium
     !+ Reads in the interpolation grid, plasma parameters, and fields
     !+ and stores the quantities in [[libfida:inter_grid]] and [[libfida:equil]]
     integer(HID_T) :: fid, gid
-    integer(HSIZE_T), dimension(2) :: dims 
-!!! Pseudo dims
-    integer(HSIZE_T), dimension(1) :: dimsphi
-!!! End
+    integer(HSIZE_T), dimension(3) :: dims 
 
     integer :: impc, ic, ir, iz, it, ind(2)
     type(LocalProfiles) :: plasma
@@ -2553,7 +2552,7 @@ subroutine read_equilibrium
     !!Read in interpolation grid
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nr", inter_grid%nr, error)
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nz", inter_grid%nz, error)
-    inter_grid%dims = [inter_grid%nr, inter_grid%nz]
+    inter_grid%dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 
     allocate(inter_grid%r(inter_grid%nr),inter_grid%z(inter_grid%nz),inter_grid%phi(inter_grid%nphi))
     allocate(inter_grid%r2d(inter_grid%nr,inter_grid%nz))
@@ -2561,22 +2560,18 @@ subroutine read_equilibrium
 !!! I definitely need to change things below, but it is currently breaking
 !!!everything so I will worry about this later.
     allocate(p_mask(inter_grid%nr,inter_grid%nz))
-    allocate(f_mask(inter_grid%nr,inter_grid%nz))
+!    allocate(f_mask(inter_grid%nr,inter_grid%nz))
     allocate(denn2d(inter_grid%nr,inter_grid%nz))
 !!! End
 
 !!! Also breaking things
 !!!     Furthermore, should nphi be second or third element?
-    dims = [inter_grid%nr, inter_grid%nz]
-!!! End
-
-!!! Making a pseudo dims to make things compile
-    dimsphi = [inter_grid%nphi]
+    dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 !!! End
 
 !!! Not sure how dims is being indexed below
     call h5ltread_dataset_double_f(gid, "/plasma/r", inter_grid%r, dims(1:1), error)
-    call h5ltread_dataset_double_f(gid, "/plasma/phi", inter_grid%phi, dims(1:1), error)
+    call h5ltread_dataset_double_f(gid, "/plasma/phi", inter_grid%phi, dims(3:3), error)
     call h5ltread_dataset_double_f(gid, "/plasma/z", inter_grid%z, dims(2:2), error)
     call h5ltread_dataset_double_f(gid, "/plasma/r2d", inter_grid%r2d, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/z2d", inter_grid%z2d, dims, error)
@@ -2640,26 +2635,26 @@ subroutine read_equilibrium
     equil%plasma%denp = equil%plasma%dene - impc*equil%plasma%denimp
 
 !!! This loop is going to get completely wrecked.
-    loop_over_cells: do ic=1, inter_grid%nr*inter_grid%nz
-        call ind2sub(inter_grid%dims,ic,ind)
-        ir = ind(1) ; iz = ind(2)
-        if(p_mask(ir,iz).lt.0.5) cycle loop_over_cells
-        plasma = equil%plasma(ir,iz)
-        plasma%vrot = [plasma%vr, plasma%vt, plasma%vz]
-        plasma%in_plasma = .True.
+ !!!   loop_over_cells: do ic=1, inter_grid%nr*inter_grid%nz
+ !!!       call ind2sub(inter_grid%dims,ic,ind)
+ !!!       ir = ind(1) ; iz = ind(2)
+ !!!       if(p_mask(ir,iz).lt.0.5) cycle loop_over_cells
+ !!!       plasma = equil%plasma(ir,iz)
+ !!!       plasma%vrot = [plasma%vr, plasma%vt, plasma%vz]
+ !!!       plasma%in_plasma = .True.
 
-        rates_avg = 0.0
-        do it=1,n
-            rates = 0.0
-            rates(1) = 1.d19
-            call randn(random3)
-            vi = plasma%vrot + sqrt(plasma%ti*0.5/(v2_to_E_per_amu*inputs%ai))*random3
-            call colrad(plasma, thermal_ion, vi, 1.0d-7, rates, denn, photons)
-            rates_avg = rates_avg + rates/n
-        enddo
-        if(sum(rates_avg).le.0.0) cycle loop_over_cells
-        equil%plasma(ir,iz)%denn = denn2d(ir,iz)*(rates_avg)/sum(rates_avg)
-    enddo loop_over_cells
+ !!!       rates_avg = 0.0
+ !!!       do it=1,n
+ !!!           rates = 0.0
+ !!!           rates(1) = 1.d19
+ !!!           call randn(random3)
+ !!!           vi = plasma%vrot + sqrt(plasma%ti*0.5/(v2_to_E_per_amu*inputs%ai))*random3
+ !!!           call colrad(plasma, thermal_ion, vi, 1.0d-7, rates, denn, photons)
+ !!!           rates_avg = rates_avg + rates/n
+ !!!       enddo
+ !!!       if(sum(rates_avg).le.0.0) cycle loop_over_cells
+ !!!       equil%plasma(ir,iz)%denn = denn2d(ir,iz)*(rates_avg)/sum(rates_avg)
+ !!!   enddo loop_over_cells
 !!! End
 
     !!Close PLASMA group
@@ -2679,7 +2674,7 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/fields/er", equil%fields%er, dims, error)
     call h5ltread_dataset_double_f(gid, "/fields/et", equil%fields%et, dims, error)
     call h5ltread_dataset_double_f(gid, "/fields/ez", equil%fields%ez, dims, error)
-    call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
+!    call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
     !!Calculate B field derivatives
 !!! More wreckage
@@ -2701,7 +2696,10 @@ subroutine read_equilibrium
     allocate(equil%mask(inter_grid%nr,inter_grid%nz))
 !!! End
     equil%mask = 0.d0
-    where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
+!    where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
+!!! Delete stuff below when things are working
+    where (p_mask.eq.1) equil%mask = 1.d0
+!!! End
     if (sum(equil%mask).le.0.d0) then
         write(*,'(a)') "READ_EQUILIBRIUM: Plasma and/or fields are not well defined anywhere"
         error stop
@@ -6021,7 +6019,7 @@ end subroutine interpol2D_2D_arr
 !=============================================================================
 !-------------------------Profiles and Fields Routines------------------------
 !=============================================================================
-subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out, cyl_interpol)
+subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
     !+ Indicator subroutine to determine if a position is in a region where
     !+ the plasma parameter and fields are valid/known
     real(Float64), dimension(3), intent(in) :: xyz
@@ -6030,73 +6028,52 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out, cyl_interpol)
         !+ Indicates whether plasma parameters and fields are valid/known
     logical, intent(in), optional           :: machine_coords
         !+ Indicates that xyz is in machine coordinates
-    logical, intent(in), optional           :: cyl_interpol
-        !+ Indicates that cylindrical interpolation is desired
-    type(InterpolCoeffs2D), intent(out), optional      :: coeffs
+    type(InterpolCoeffs3D), intent(out), optional      :: coeffs
         !+ Linear Interpolation coefficients used in calculation
     real(Float64), dimension(3), intent(out), optional :: uvw_out
         !+ Position in machine coordinates
 
     real(Float64), dimension(3) :: uvw
-    type(InterpolCoeffs2D) :: c
+!@    type(InterpolCoeffs2D) :: c
     type(InterpolCoeffs3D) :: b
     real(Float64) :: R, phi, W, mask
     logical :: mc
-    logical :: ci
-    integer :: i, j, err
+    integer :: i, j, k, err
 
     err = 1
     mc = .False.
     if(present(machine_coords)) mc = machine_coords
-    ci = .False.
-    if(present(cyl_interpol)) ci = cyl_interpol
 
     if(mc) then
         uvw = xyz
     else
-!!# Here the program converts plasma point to machine coordinates
         !! Convert to machine coordinates
         call xyz_to_uvw(xyz,uvw)
     endif
 
-!!# Below is the radial vector made from x and y machine coord
     R = sqrt(uvw(1)*uvw(1) + uvw(2)*uvw(2))
-!!# Below is the altitude of the device in machine coord
     W = uvw(3)
-!!# Below is the angular coordinate of the device in machine coord
     phi = atan2(uvw(2),uvw(1))
     !! Interpolate mask value
-!!# Here there is some interpolating going on. Probably need to change some of
-!!# for the phi direction.
-!!# Need to figure out which interpolation routine this one is calling
-    if(ci) then
-!!# NEED TO MAKE SOMETHING OF THIS BELOW
-        call cyl_interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
-    else
-        call interpol_coeff(inter_grid%r, inter_grid%z, R, W, c, err)
-    endif
+    call cyl_interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
+!@    call interpol_coeff(inter_grid%r, inter_grid%z, R, W, c, err)
 
-!!# After getting the interpolation coefficients, use them below for mask
-!!# values.
-!!#
-!!# Below is the check to see if the profile is within the plasma. It uses the
-!!# coefficients from the previous call and something called mask. If the sum is
-!!# greater than 0.5, then it's within the plasma. else the default value is F
     inp = .False.
-    if(err.eq.0) then
-        i = c%i
-        j = c%j
-        mask = c%b11*equil%mask(i,j)   + c%b12*equil%mask(i,j+1) + &
-               c%b21*equil%mask(i+1,j) + c%b22*equil%mask(i+1,j+1)
+!@    if(err.eq.0) then
+!@        i = b%i
+!@        j = b%j
+!@        k = b%k
+!!! Need to change stuff about mask to be in 3-D
+!@        mask = b%b11*equil%mask(i,j)   + c%b12*equil%mask(i,j+1) + &
+!@            c%b21*equil%mask(i+1,j) + c%b22*equil%mask(i+1,j+1) 
+!!! End
 
-        if((mask.ge.0.5).and.(err.eq.0)) then
-            inp = .True.
-        endif
-    endif
+!@        if((mask.ge.0.5).and.(err.eq.0)) then
+!@            inp = .True.
+!@        endif
+!@    endif
 
-!!# If the user wants the coeffients from the calculation, than it is output.
-!!# the machine coordinates are also output.
-    if(present(coeffs)) coeffs = c
+    if(present(coeffs)) coeffs = b
     if(present(uvw_out)) uvw_out = uvw
 
 end subroutine in_plasma

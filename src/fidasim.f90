@@ -2594,7 +2594,7 @@ subroutine read_equilibrium
     endif
 
     !!Read in plasma parameters
-    allocate(equil%plasma(inter_grid%nr,inter_grid%nz))
+    allocate(equil%plasma(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
 
     call h5ltread_dataset_double_f(gid, "/plasma/dene", equil%plasma%dene, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/te", equil%plasma%te, dims, error)
@@ -6092,11 +6092,11 @@ subroutine get_plasma(plasma, pos, ind)
         !+ [[libfida:beam_grid]] indices
 
     logical :: inp
-    type(InterpolCoeffs2D) :: coeffs
+    type(InterpolCoeffs3D) :: coeffs
     real(Float64), dimension(3) :: xyz, uvw, vrot_uvw
     !!# machine = uvw, beam = xyz
     real(Float64) :: phi, s, c
-    integer :: i, j
+    integer :: i, j, k
 
     plasma%in_plasma = .False.
 
@@ -6114,12 +6114,17 @@ subroutine get_plasma(plasma, pos, ind)
         phi = atan2(uvw(2),uvw(1))
         i = coeffs%i
         j = coeffs%j
+        k = coeffs%k
 
 !!# Use the coefficients from in_plasma to get the plasma at that point.
 !!# Probably need to change things below for the third dimension
 !!# stuff
-        plasma = coeffs%b11*equil%plasma(i,j)   + coeffs%b12*equil%plasma(i,j+1) + &
-                 coeffs%b21*equil%plasma(i+1,j) + coeffs%b22*equil%plasma(i+1,j+1)
+!!! Double check this
+        plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j,k+1) + &
+            coeffs%b121*equil%plasma(i,j+1,k) + coeffs%b122*equil%plasma(i,j+1,k+1) + &
+            coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b212*equil%plasma(i+1,j,k+1) + &
+            coeffs%b221*equil%plasma(i+1,j+1,k) + coeffs%b222*equil%plasma(i+1,j+1,k+1)
+!!! End
 
         s = sin(phi) ; c = cos(phi)
         vrot_uvw(1) = plasma%vr*c - plasma%vt*s
@@ -6129,7 +6134,7 @@ subroutine get_plasma(plasma, pos, ind)
         plasma%pos = xyz
         plasma%uvw = uvw
         plasma%in_plasma = .True.
-        plasma%c = coeffs
+        plasma%b = coeffs
     endif
 
 end subroutine get_plasma

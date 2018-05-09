@@ -370,6 +370,8 @@ type FastIonDistribution
         !+ Number of pitches
     integer(Int32) :: nr
         !+ Number of radii
+    integer(Int32) :: nphi
+        !+ Number of phi values
     integer(Int32) :: nz
         !+ Number of z values
     real(Float64)  :: dE
@@ -418,6 +420,10 @@ type FastIon
         !+ Indicates whether the fast-ion crosses the [[libfida:beam_grid]]
     real(Float64)  :: r = 0.d0
         !+ Radial position of fast-ion [cm]
+!!! Hope this is okay
+    real(Float64)  :: phi = 0.d0
+        !+ Angular position of fast-ion [rad]
+!!! End
     real(Float64)  :: z = 0.d0
         !+ Vertical position of fast-ion [cm]
     real(Float64)  :: phi_enter = 0.d0
@@ -2787,7 +2793,9 @@ subroutine read_mc(fid, error)
         !+ Error code
 
     integer(HSIZE_T), dimension(1) :: dims
-    integer(Int32) :: i,j,ii,ir,iz
+!!! iphi used for stuff below
+    integer(Int32) :: i,j,ii,ir,iz,iphi
+!!! End
     real(Float64) :: phi,phi_enter,phi_exit,delta_phi
     real(Float64), dimension(3) :: uvw,ri,vi,e1_xyz,e2_xyz,C_xyz,dum
     integer(Int32), dimension(1) :: minpos
@@ -2841,7 +2849,9 @@ subroutine read_mc(fid, error)
     cnt=0
     e1_xyz = matmul(beam_grid%inv_basis,[1.0,0.0,0.0])
     e2_xyz = matmul(beam_grid%inv_basis,[0.0,1.0,0.0])
-    !$OMP PARALLEL DO schedule(guided) private(i,ii,j,ir,iz,minpos,fields,uvw,phi,ri,vi, &
+!!! No idea what this does. Inputting iphi below
+    !$OMP PARALLEL DO schedule(guided) private(i,ii,j,ir,iz,iphi,minpos,fields,uvw,phi,ri,vi, &
+!!! End
     !$OMP& delta_phi,phi_enter,phi_exit,C_xyz)
     particle_loop: do i=1,particles%nparticle
         if(inputs%verbose.ge.2) then
@@ -2869,11 +2879,18 @@ subroutine read_mc(fid, error)
 
         minpos = minloc(abs(inter_grid%r - particles%fast_ion(i)%r))
         ir = minpos(1)
+        minpos = minloc(abs(inter_grid%phi - particles%fast_ion(i)%phi))
+        iphi = minpos(1)
         minpos = minloc(abs(inter_grid%z - particles%fast_ion(i)%z))
         iz = minpos(1)
         !$OMP CRITICAL(mc_denf)
-        equil%plasma(ir,iz)%denf = equil%plasma(ir,iz)%denf + weight(i) / &
+!!! Not really sure what this is doing, but I'm going to incorporate to make the
+!!! error go away
+!!!     Looks like I may need to change that normalization thing to dv or
+!!!     something like it
+        equil%plasma(ir,iz,iphi)%denf = equil%plasma(ir,iz,iphi)%denf + weight(i) / &
                                    (2*pi*particles%fast_ion(i)%r*inter_grid%da)
+!!! End
         !$OMP END CRITICAL(mc_denf)
         cnt=cnt+1
     enddo particle_loop
@@ -6185,8 +6202,8 @@ subroutine get_fields(fields, pos, ind, machine_coords)
     real(Float64), dimension(3) :: uvw_bfield, uvw_efield
     real(Float64), dimension(3) :: xyz_bfield, xyz_efield
     real(Float64) :: phi, s, c
-    type(InterpolCoeffs2D) :: coeffs
-    integer :: i, j
+    type(InterpolCoeffs3D) :: coeffs
+    integer :: i, j, k
 
     fields%in_plasma = .False.
 
@@ -6201,9 +6218,12 @@ subroutine get_fields(fields, pos, ind, machine_coords)
         phi = atan2(uvw(2),uvw(1))
         i = coeffs%i
         j = coeffs%j
+        k = coeffs%k
 
-        fields = coeffs%b11*equil%fields(i,j) + coeffs%b12*equil%fields(i,j+1) + &
-                 coeffs%b21*equil%fields(i+1,j) + coeffs%b22*equil%fields(i+1,j+1)
+        fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b112*equil%fields(i,j,k+1) + &
+            coeffs%b121*equil%fields(i,j+1,k) + coeffs%b122*equil%fields(i,j+1,k+1) + &
+            coeffs%b211*equil%fields(i+1,j,k) + coeffs%b212*equil%fields(i+1,j,k+1) + &
+            coeffs%b221*equil%fields(i+1,j+1,k) + coeffs%b222*equil%fields(i+1,j+1,k+1)
 
         phi = atan2(uvw(2),uvw(1))
         s = sin(phi) ; c = cos(phi)
@@ -6237,7 +6257,7 @@ subroutine get_fields(fields, pos, ind, machine_coords)
         fields%uvw = uvw
         fields%in_plasma = .True.
         fields%machine_coords = mc
-        fields%c = coeffs
+        fields%b = coeffs
     endif
 
 end subroutine get_fields

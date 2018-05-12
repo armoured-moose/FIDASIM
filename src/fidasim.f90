@@ -352,7 +352,7 @@ end type LocalEMFields
 
 type Equilibrium
     !+MHD Equilbrium 
-    type(EMFields), dimension(:,:), allocatable :: fields
+    type(EMFields), dimension(:,:,:), allocatable :: fields
         !+ Electro-magnetic fields at points defined in [[libfida:inter_grid]]
     type(Profiles), dimension(:,:,:), allocatable :: plasma
         !+ Plasma parameters at points defined in [[libfida:inter_grid]]
@@ -408,10 +408,12 @@ type FastIonDistribution
         !+ Angles [rad]
     real(Float64), dimension(:), allocatable       :: z
         !+ Z [cm]
-    real(Float64), dimension(:,:), allocatable     :: denf
-        !+ Fast-ion density defined on the [[libfida:inter_grid]]: denf(R,Z)
-    real(Float64), dimension(:,:,:,:), allocatable :: f
-        !+ Fast-ion distribution function defined on the [[libfida:inter_grid]]: F(E,p,R,Z)
+    real(Float64), dimension(:,:,:), allocatable     :: denf
+!!! This comment doesn't really make sense
+        !+ Fast-ion density defined on the [[libfida:inter_grid]]: denf(R,Z,Phi)
+!!! End
+    real(Float64), dimension(:,:,:,:,:), allocatable :: f
+        !+ Fast-ion distribution function defined on the [[libfida:inter_grid]]: F(E,p,R,Z,Phi)
 end type FastIonDistribution
 
 type FastIon
@@ -2670,7 +2672,7 @@ subroutine read_equilibrium
     call h5gopen_f(fid, "/fields", gid, error)
 
 !!! More wreckage
-    allocate(equil%fields(inter_grid%nr,inter_grid%nz))
+    allocate(equil%fields(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
 !!! End
 
     !!Read in electromagnetic fields
@@ -2684,6 +2686,7 @@ subroutine read_equilibrium
 
     !!Calculate B field derivatives
 !!! More wreckage
+!!! Need to change dimensions of the derivative to 3-D?
     call deriv(inter_grid%r, inter_grid%z, equil%fields%br, equil%fields%dbr_dr, equil%fields%dbr_dz)
     call deriv(inter_grid%r, inter_grid%z, equil%fields%bt, equil%fields%dbt_dr, equil%fields%dbt_dz)
     call deriv(inter_grid%r, inter_grid%z, equil%fields%bz, equil%fields%dbz_dr, equil%fields%dbz_dz)
@@ -2698,9 +2701,7 @@ subroutine read_equilibrium
     !!Close HDF5 interface
     call h5close_f(error)
 
-!!! More wreckage
     allocate(equil%mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
-!!! End
     equil%mask = 0.d0
 !@   where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
 !!! Delete stuff below when things are working
@@ -2741,8 +2742,11 @@ subroutine read_f(fid, error)
     endif
 
     allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz))
-    allocate(fbm%denf(fbm%nr, fbm%nz))
-    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz))
+    allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
+!!! I changed this below, it is likely I need to change many other things in
+!!! this because the program is reading in the distribution function
+    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
+!!! End
 
     dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz]
     call h5ltread_dataset_double_f(fid, "/energy", fbm%energy, dims(1:1), error)
@@ -2770,7 +2774,9 @@ subroutine read_f(fid, error)
     fbm%p_range = fbm%pmax - fbm%pmin
 
     do ir=1,fbm%nr
-        fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:))*fbm%r(ir)
+    !!! Not sure how this is ending, but i'm going to put some colons here
+        fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
+    !!! End
     enddo
 
     if(inputs%verbose.ge.1) then
@@ -6272,7 +6278,7 @@ subroutine get_distribution(fbeam, denf, pos, ind, coeffs)
         !+ Position in beam grid coordinates
     integer(Int32), dimension(3), intent(in), optional :: ind
         !+ [[libfida:beam_grid]] indices
-    type(InterpolCoeffs2D), intent(in), optional       :: coeffs
+    type(InterpolCoeffs3D), intent(in), optional       :: coeffs
         !+ Precomputed Linear Interpolation Coefficients
 
     real(Float64), dimension(3) :: xyz, uvw
@@ -6281,7 +6287,12 @@ subroutine get_distribution(fbeam, denf, pos, ind, coeffs)
 
     if(present(coeffs)) then
         call interpol(fbm%r, fbm%z, fbm%f, R, Z, fbeam, err, coeffs)
+!!! Temporarily changing the call to cyl so I can eliminate the error
         call interpol(fbm%r, fbm%z, fbm%denf, R, Z, denf, err, coeffs)
+!!! End
+!!! Not going to work, I'm going to need to make a interpol3D_2D_arr thing
+!!!        call cyl_interpol3D_coeff(fbm%r, fbm%z, fbm%denf, R, Z, denf, err, coeffs)
+!!! End
     else
         if(present(ind)) call get_position(ind,xyz)
         if(present(pos)) xyz = pos
@@ -6330,7 +6341,9 @@ subroutine get_ep_denf(energy, pitch, denf, pos, ind, coeffs)
 
     if((dE.le.fbm%dE).and.(dp.le.fbm%dp)) then
         if(present(coeffs)) then
+!!! fbm%f used to be 2 dim, but now it is 3 dim
             call interpol(inter_grid%r, inter_grid%z, fbm%f, R, Z, fbeam, err, coeffs)
+!!! End
         else
             if(present(ind)) call get_position(ind,xyz)
             if(present(pos)) xyz = pos
@@ -7538,7 +7551,9 @@ subroutine mc_fastion(ind,fields,eb,ptch,denf)
     call get_fields(fields,pos=rg)
     if(.not.fields%in_plasma) return
 
-    call get_distribution(fbeam,denf,pos=rg, coeffs=fields%c)
+!!! Not investigating, just trying to see what happens
+    call get_distribution(fbeam,denf,pos=rg, coeffs=fields%b)
+!!! End
     call randind(fbeam,ep_ind)
     call randu(randomu3)
     eb = fbm%energy(ep_ind(1,1)) + fbm%dE*(randomu3(1)-0.5)
@@ -9325,6 +9340,8 @@ end subroutine pnpa_mc
 
 subroutine neutron_f
     !+ Calculate neutron emission rate using a fast-ion distribution function F(E,p,r,z)
+!!! There is a good possibility that I need to change this as well. Becareful
+!!! because phi is the gyroangle here and NOT the toroidal angle
     integer :: ir, iz, ie, ip, iphi, nphi
     type(LocalProfiles) :: plasma
     type(LocalEMFields) :: fields

@@ -234,9 +234,7 @@ type InterpolationGrid
         !+ Grid element area [\(cm^2\)]
     real(Float64), dimension(:,:,:),   allocatable :: dv
         !+ Cell volumes [\(cm^3\)]
-!!! I will probably need to change this to dims(3)
     integer(Int32) :: dims(3)
-!!! End
         !+ Dimension of the interpolation grid
     real(Float64), dimension(:),   allocatable :: r
         !+ Radii values [cm]
@@ -344,8 +342,6 @@ type, extends( EMFields ) :: LocalEMFields
         !+ Vector perpendicular to `b_norm` and `a_norm`
     real(Float64), dimension(3) :: e_norm = 0.d0
         !+ Direction of electric field in beam grid coordinates
-!!!    type(InterpolCoeffs2D) :: c
-        !+ Linear Interpolation Coefficients and indicies for interpolation at `pos`
     type(InterpolCoeffs3D) :: b
         !+ Cylindrical Interpolation Coefficients and indicies for interpolation at `pos`
 end type LocalEMFields
@@ -409,9 +405,7 @@ type FastIonDistribution
     real(Float64), dimension(:), allocatable       :: z
         !+ Z [cm]
     real(Float64), dimension(:,:,:), allocatable     :: denf
-!!! This comment doesn't really make sense
         !+ Fast-ion density defined on the [[libfida:inter_grid]]: denf(R,Z,Phi)
-!!! End
     real(Float64), dimension(:,:,:,:,:), allocatable :: f
         !+ Fast-ion distribution function defined on the [[libfida:inter_grid]]: F(E,p,R,Z,Phi)
 end type FastIonDistribution
@@ -422,10 +416,8 @@ type FastIon
         !+ Indicates whether the fast-ion crosses the [[libfida:beam_grid]]
     real(Float64)  :: r = 0.d0
         !+ Radial position of fast-ion [cm]
-!!! Hope this is okay
     real(Float64)  :: phi = 0.d0
         !+ Angular position of fast-ion [rad]
-!!! End
     real(Float64)  :: z = 0.d0
         !+ Vertical position of fast-ion [cm]
     real(Float64)  :: phi_enter = 0.d0
@@ -2546,7 +2538,7 @@ subroutine read_equilibrium
     integer :: error
     integer :: n = 50
 
-    integer, dimension(:,:), allocatable :: p_mask, f_mask
+    integer, dimension(:,:,:), allocatable :: p_mask, f_mask
     real(Float64), dimension(:,:), allocatable :: denn2d
 
     !!Initialize HDF5 interface
@@ -2566,17 +2558,14 @@ subroutine read_equilibrium
     allocate(inter_grid%r(inter_grid%nr),inter_grid%z(inter_grid%nz),inter_grid%phi(inter_grid%nphi))
     allocate(inter_grid%r2d(inter_grid%nr,inter_grid%nz))
     allocate(inter_grid%z2d(inter_grid%nr,inter_grid%nz))
-!!! I definitely need to change things below, but it is currently breaking
-!!!everything so I will worry about this later.
-    allocate(p_mask(inter_grid%nr,inter_grid%nz))
-!@   allocate(f_mask(inter_grid%nr,inter_grid%nz))
+    allocate(p_mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
+    allocate(f_mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
+!!! how do I deal with the neutral for inter_grid%nphi
     allocate(denn2d(inter_grid%nr,inter_grid%nz))
 !!! End
 
 !!! Also breaking things
-!!!     Furthermore, should nphi be second or third element?
     dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
-!!! End
 
 !!! Not sure how dims is being indexed below
     call h5ltread_dataset_double_f(gid, "/plasma/r", inter_grid%r, dims(1:1), error)
@@ -2672,9 +2661,7 @@ subroutine read_equilibrium
     !!Open FIELDS group
     call h5gopen_f(fid, "/fields", gid, error)
 
-!!! More wreckage
     allocate(equil%fields(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
-!!! End
 
     !!Read in electromagnetic fields
     call h5ltread_dataset_double_f(gid, "/fields/br", equil%fields%br, dims, error)
@@ -2686,7 +2673,6 @@ subroutine read_equilibrium
 !@   call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
     !!Calculate B field derivatives
-!!! More wreckage
 !!! Need to change dimensions of the derivative to 3-D?
     call deriv(inter_grid%r, inter_grid%z, equil%fields%br, equil%fields%dbr_dr, equil%fields%dbr_dz)
     call deriv(inter_grid%r, inter_grid%z, equil%fields%bt, equil%fields%dbt_dr, equil%fields%dbt_dz)
@@ -2704,10 +2690,8 @@ subroutine read_equilibrium
 
     allocate(equil%mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
     equil%mask = 0.d0
-!@   where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
-!!! Delete stuff below when things are working
-!@    where (p_mask.eq.1) equil%mask = 1.d0
-!!! End
+    where ((p_mask.eq.1).and.(f_mask.eq.1)) equil%mask = 1.d0
+    where (p_mask.eq.1) equil%mask = 1.d0
     if (sum(equil%mask).le.0.d0) then
         write(*,'(a)') "READ_EQUILIBRIUM: Plasma and/or fields are not well defined anywhere"
         error stop
@@ -2744,10 +2728,7 @@ subroutine read_f(fid, error)
 
     allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz))
     allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
-!!! I changed this below, it is likely I need to change many other things in
-!!! this because the program is reading in the distribution function
     allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
-!!! End
 
     dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz]
     call h5ltread_dataset_double_f(fid, "/energy", fbm%energy, dims(1:1), error)
@@ -2775,9 +2756,7 @@ subroutine read_f(fid, error)
     fbm%p_range = fbm%pmax - fbm%pmin
 
     do ir=1,fbm%nr
-    !!! Not sure how this is ending, but i'm going to put some colons here
         fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
-    !!! End
     enddo
 
     if(inputs%verbose.ge.1) then
@@ -5799,8 +5778,8 @@ subroutine interpol2D_coeff_arr(x,y,xout,yout,c,err)
 end subroutine interpol2D_coeff_arr
 
 subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phiout,zout,c,err)
-    !!! z(x,y) below confusing
-    !+ Cylindrical interpolation coefficients and indicies for a 3D grid ?z(x,y)
+    !+ Cylindrical interpolation coefficients and indicies for a 3D grid
+    !+ f(r,phi,z)
     real(Float64), intent(in)           :: rmin
         !+ Minimum R 
     real(Float64), intent(in)           :: dr
@@ -5881,9 +5860,8 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
 end subroutine cyl_interpol3D_coeff
 
 subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
-!!! Check comment
-    !!Cylindrical interpolation coefficients and indicies for a 3D grid ?z(x,y)
-!!! End
+    !!Cylindrical interpolation coefficients and indicies for a 3D grid
+    !! f(r,phi,z)
     real(Float64), dimension(:), intent(in) :: r
         !+ R values
     real(Float64), dimension(:), intent(in) :: phi
@@ -6043,9 +6021,7 @@ subroutine interpol2D_2D_arr(x, y, z, xout, yout, zout, err, coeffs)
 end subroutine interpol2D_2D_arr
 
 subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
-!!! Need to figure out the proper comment
-    !+ Performs cylindrical interpolation on a 2D grid z(x,y)
-!!! End
+    !+ Performs cylindrical interpolation on a 3D grid f(r,phi,z)
     real(Float64), dimension(:), intent(in) :: r
         !+ R values
     real(Float64), dimension(:), intent(in) :: phi
@@ -6097,9 +6073,8 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
 end subroutine interpol3D_arr
 
 subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs)
-!!! Need to figure out the proper comment
-    !+ Performs bilinear interpolation on a 2D grid of 2D arrays z(:,:,x,y)
-!!! End
+    !+ Performs cylindrical interpolation on a 3D grid of 2D arrays
+    !+ f(:,:,r,phi,z)
     real(Float64), dimension(:), intent(in) :: r
         !+ R values
     real(Float64), dimension(:), intent(in) :: phi
@@ -6190,7 +6165,6 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
 !!! When I change the interface later on, this will need to change with it
     call cyl_interpol3D_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
 !!! End
-!@    call interpol_coeff(inter_grid%r, inter_grid%z, R, W, c, err)
 
     inp = .False.
     if(err.eq.0) then
@@ -6226,7 +6200,6 @@ subroutine get_plasma(plasma, pos, ind)
     logical :: inp
     type(InterpolCoeffs3D) :: coeffs
     real(Float64), dimension(3) :: xyz, uvw, vrot_uvw
-    !!# machine = uvw, beam = xyz
     real(Float64) :: phi, s, c
     integer :: i, j, k
 
@@ -6235,22 +6208,13 @@ subroutine get_plasma(plasma, pos, ind)
     if(present(ind)) call get_position(ind,xyz)
     if(present(pos)) xyz = pos
 
-    !!# When get plasma is called, it is assumed that the coord = beam
-    !!# The call below will check if xyz is in plasma, output true if so,
-    !!# provide linear interpolation, and give the position in machine coord
-!!# latter two still confusing
     call in_plasma(xyz,inp,.False.,coeffs,uvw)
-!!# After in_plasma successfully runs, the below routine executes if the profile
-!!# is within the plasma.
     if(inp) then
         phi = atan2(uvw(2),uvw(1))
         i = coeffs%i
         j = coeffs%j
         k = coeffs%k
 
-!!# Use the coefficients from in_plasma to get the plasma at that point.
-!!# Probably need to change things below for the third dimension
-!!# stuff
 !!! Double check this
         plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j,k+1) + &
             coeffs%b121*equil%plasma(i,j+1,k) + coeffs%b122*equil%plasma(i,j+1,k+1) + &
@@ -6396,12 +6360,7 @@ subroutine get_distribution(fbeam, denf, pos, ind, coeffs)
 
     if(present(coeffs)) then
         call interpol(fbm%r, fbm%phi, fbm%z, fbm%f, R, Phi, Z, fbeam, err, coeffs)
-!!! Temporarily changing the call to cyl so I can eliminate the error
         call interpol(fbm%r, fbm%phi, fbm%z, fbm%denf, R, Phi, Z, denf, err, coeffs)
-!!! End
-!!! Not going to work, I'm going to need to make a interpol3D_2D_arr thing
-!!!        call cyl_interpol3D_coeff(fbm%r, fbm%z, fbm%denf, R, Z, denf, err, coeffs)
-!!! End
     else
         if(present(ind)) call get_position(ind,xyz)
         if(present(pos)) xyz = pos
@@ -6451,9 +6410,7 @@ subroutine get_ep_denf(energy, pitch, denf, pos, ind, coeffs)
 
     if((dE.le.fbm%dE).and.(dp.le.fbm%dp)) then
         if(present(coeffs)) then
-!!! fbm%f used to be 2 dim, but now it is 3 dim
             call interpol(inter_grid%r, inter_grid%phi, inter_grid%z, fbm%f, R, Phi, Z, fbeam, err, coeffs)
-!!! End
         else
             if(present(ind)) call get_position(ind,xyz)
             if(present(pos)) xyz = pos
@@ -7662,9 +7619,7 @@ subroutine mc_fastion(ind,fields,eb,ptch,denf)
     call get_fields(fields,pos=rg)
     if(.not.fields%in_plasma) return
 
-!!! Not investigating, just trying to see what happens
     call get_distribution(fbeam,denf,pos=rg, coeffs=fields%b)
-!!! End
     call randind(fbeam,ep_ind)
     call randu(randomu3)
     eb = fbm%energy(ep_ind(1,1)) + fbm%dE*(randomu3(1)-0.5)

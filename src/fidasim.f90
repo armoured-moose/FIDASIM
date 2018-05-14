@@ -1052,7 +1052,6 @@ interface interpol_coeff
     !+ Calculates linear interpolation coefficients
     module procedure interpol1D_coeff, interpol1D_coeff_arr
     module procedure interpol2D_coeff, interpol2D_coeff_arr
-    module procedure interpol3D_arr, interpol3D_2D_arr
 end interface
 
 interface cyl_interpol3D_coeff
@@ -1064,6 +1063,7 @@ interface interpol
     !+ Performs linear/bilinear interpolation
     module procedure interpol1D_arr
     module procedure interpol2D_arr, interpol2D_2D_arr
+    module procedure interpol3D_arr, interpol3D_2D_arr
 end interface
 
 !! definition of the structures:
@@ -6391,13 +6391,13 @@ subroutine get_distribution(fbeam, denf, pos, ind, coeffs)
         !+ Precomputed Linear Interpolation Coefficients
 
     real(Float64), dimension(3) :: xyz, uvw
-    real(Float64) :: R, Z
+    real(Float64) :: R, Z, Phi
     integer :: err
 
     if(present(coeffs)) then
-        call interpol(fbm%r, fbm%z, fbm%f, R, Z, fbeam, err, coeffs)
+        call interpol(fbm%r, fbm%phi, fbm%z, fbm%f, R, Phi, Z, fbeam, err, coeffs)
 !!! Temporarily changing the call to cyl so I can eliminate the error
-        call interpol(fbm%r, fbm%z, fbm%denf, R, Z, denf, err, coeffs)
+        call interpol(fbm%r, fbm%phi, fbm%z, fbm%denf, R, Phi, Z, denf, err, coeffs)
 !!! End
 !!! Not going to work, I'm going to need to make a interpol3D_2D_arr thing
 !!!        call cyl_interpol3D_coeff(fbm%r, fbm%z, fbm%denf, R, Z, denf, err, coeffs)
@@ -6410,9 +6410,10 @@ subroutine get_distribution(fbeam, denf, pos, ind, coeffs)
         call xyz_to_uvw(xyz,uvw)
         R = sqrt(uvw(1)*uvw(1) + uvw(2)*uvw(2))
         Z = uvw(3)
+        Phi = atan2(uvw(2),uvw(1))
 
-        call interpol(fbm%r, fbm%z, fbm%f, R, Z, fbeam, err)
-        call interpol(fbm%r, fbm%z, fbm%denf, R, Z, denf, err)
+        call interpol(fbm%r, fbm%phi, fbm%z, fbm%f, R, Phi, Z, fbeam, err, coeffs)
+        call interpol(fbm%r, fbm%phi, fbm%z, fbm%denf, R, Phi, Z, denf, err, coeffs)
     endif
 
 end subroutine get_distribution
@@ -6430,14 +6431,14 @@ subroutine get_ep_denf(energy, pitch, denf, pos, ind, coeffs)
         !+ Position in beam grid coordinates
     integer(Int32), dimension(3), intent(in), optional :: ind
         !+ [[libfida:beam_grid]] indices
-    type(InterpolCoeffs2D), intent(in), optional       :: coeffs
+    type(InterpolCoeffs3D), intent(in), optional       :: coeffs
         !+ Precomputed Linear Interpolation Coefficients
 
     real(Float64), dimension(3) :: xyz, uvw
     real(Float64), dimension(fbm%nenergy,fbm%npitch)  :: fbeam
     integer(Int32), dimension(2) :: epi
     integer(Int32), dimension(1) :: dummy
-    real(Float64) :: R, Z
+    real(Float64) :: R, Phi, Z
     real(Float64) :: dE, dp
     integer :: err
 
@@ -6451,7 +6452,7 @@ subroutine get_ep_denf(energy, pitch, denf, pos, ind, coeffs)
     if((dE.le.fbm%dE).and.(dp.le.fbm%dp)) then
         if(present(coeffs)) then
 !!! fbm%f used to be 2 dim, but now it is 3 dim
-            call interpol(inter_grid%r, inter_grid%z, fbm%f, R, Z, fbeam, err, coeffs)
+            call interpol(inter_grid%r, inter_grid%phi, inter_grid%z, fbm%f, R, Phi, Z, fbeam, err, coeffs)
 !!! End
         else
             if(present(ind)) call get_position(ind,xyz)
@@ -6461,8 +6462,9 @@ subroutine get_ep_denf(energy, pitch, denf, pos, ind, coeffs)
             call xyz_to_uvw(xyz,uvw)
             R = sqrt(uvw(1)*uvw(1) + uvw(2)*uvw(2))
             Z = uvw(3)
+            Phi = atan2(uvw(2),uvw(1))
 
-            call interpol(inter_grid%r, inter_grid%z, fbm%f, R, Z, fbeam, err)
+            call interpol(inter_grid%r, inter_grid%phi, inter_grid%z, fbm%f, R, Phi, Z, fbeam, err, coeffs)
         endif
         denf = fbeam(epi(1),epi(2))
     else

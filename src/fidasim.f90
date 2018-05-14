@@ -1052,6 +1052,7 @@ interface interpol_coeff
     !+ Calculates linear interpolation coefficients
     module procedure interpol1D_coeff, interpol1D_coeff_arr
     module procedure interpol2D_coeff, interpol2D_coeff_arr
+    module procedure interpol3D_arr, interpol3D_2D_arr
 end interface
 
 interface cyl_interpol3D_coeff
@@ -5880,7 +5881,9 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
 end subroutine cyl_interpol3D_coeff
 
 subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
+!!! Check comment
     !!Cylindrical interpolation coefficients and indicies for a 3D grid ?z(x,y)
+!!! End
     real(Float64), dimension(:), intent(in) :: r
         !+ R values
     real(Float64), dimension(:), intent(in) :: phi
@@ -6038,6 +6041,112 @@ subroutine interpol2D_2D_arr(x, y, z, xout, yout, zout, err, coeffs)
     if(present(err)) err = err_status
 
 end subroutine interpol2D_2D_arr
+
+subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
+!!! Need to figure out the proper comment
+    !+ Performs cylindrical interpolation on a 2D grid z(x,y)
+!!! End
+    real(Float64), dimension(:), intent(in) :: r
+        !+ R values
+    real(Float64), dimension(:), intent(in) :: phi
+        !+ Phi values
+    real(Float64), dimension(:), intent(in) :: z
+        !+ Z values
+    real(Float64), dimension(:,:,:), intent(in) :: d
+        !+ Values at r,phi,z: d(r,phi,z)
+    real(Float64), intent(in)               :: rout
+        !+ R value to interpolate
+    real(Float64), intent(in)               :: phiout
+        !+ Phi value to interpolate
+    real(Float64), intent(in)               :: zout
+        !+ Z value to interpolate
+    real(Float64), intent(out)                :: dout
+        !+ Interpolant: d(rout,phiout,zout)
+    integer, intent(out), optional          :: err
+        !+ Error code
+    type(InterpolCoeffs3D), intent(in), optional :: coeffs
+        !+ Precomputed Linear Interpolation Coefficients
+
+    type(InterpolCoeffs3D) :: b
+    integer :: i, j, k, err_status
+
+    err_status = 1
+    if(present(coeffs)) then
+        b = coeffs
+        err_status = 0
+    else
+!!! Will need to change later on after remerge
+        call cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,b,err)
+!!! End
+    endif
+
+    if(err_status.eq.0) then
+        i = b%i
+        j = b%j
+        k = b%k
+        dout = b%b111*d(i,j,k) + b%b112*d(i,j,k+1) + &
+            b%b121*d(i,j+1,k) + b%b122*d(i,j+1,k+1) + &
+            b%b211*d(i+1,j,k) + b%b212*d(i+1,j,k+1) + &
+            b%b221*d(i+1,j+1,k) + b%b222*d(i+1,j+1,k+1)
+    else
+        dout = 0.d0
+    endif
+
+    if(present(err)) err = err_status
+
+end subroutine interpol3D_arr
+
+subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs)
+!!! Need to figure out the proper comment
+    !+ Performs bilinear interpolation on a 2D grid of 2D arrays z(:,:,x,y)
+!!! End
+    real(Float64), dimension(:), intent(in) :: r
+        !+ R values
+    real(Float64), dimension(:), intent(in) :: phi
+        !+ Phi values
+    real(Float64), dimension(:), intent(in) :: z
+        !+ Z values
+    real(Float64), dimension(:,:,:,:,:), intent(in) :: f
+        !+ Values at r,phi,z: f(:,:,x,y)
+    real(Float64), intent(in)               :: rout
+        !+ R value to interpolate
+    real(Float64), intent(in)               :: phiout
+        !+ Phi value to interpolate
+    real(Float64), intent(in)               :: zout
+        !+ Z value to interpolate
+    real(Float64), dimension(:,:), intent(out)    :: fout
+        !+ Interpolant: f(:,:,rout,phiout,zout)
+    integer, intent(out), optional          :: err
+        !+ Error code
+    type(InterpolCoeffs3D), intent(in), optional :: coeffs
+        !+ Precomputed Linear Interpolation Coefficients
+
+    type(InterpolCoeffs3D) :: b
+    integer :: i, j, k, err_status
+
+    err_status = 1
+    if(present(coeffs)) then
+        b = coeffs
+        err_status = 0
+    else
+        call cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,b,err)
+    endif
+
+    if(err_status.eq.0) then
+        i = b%i
+        j = b%j
+        k = b%k
+        fout = b%b111*f(:,:,i,j,k) + b%b112*f(:,:,i,j,k+1) + &
+            b%b121*f(:,:,i,j+1,k) + b%b122*f(:,:,i,j+1,k+1) + &
+            b%b211*f(:,:,i+1,j,k) + b%b212*f(:,:,i+1,j,k+1) + &
+            b%b221*f(:,:,i+1,j+1,k) + b%b222*f(:,:,i+1,j+1,k+1)
+    else
+        fout = 0.0
+    endif
+
+    if(present(err)) err = err_status
+
+end subroutine interpol3D_2D_arr
 
 !=============================================================================
 !-------------------------Profiles and Fields Routines------------------------

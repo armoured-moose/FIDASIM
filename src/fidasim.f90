@@ -9451,9 +9451,8 @@ end subroutine pnpa_mc
 
 subroutine neutron_f
     !+ Calculate neutron emission rate using a fast-ion distribution function F(E,p,r,z)
-!!! There is a good possibility that I need to change this as well. Becareful
-!!! because phi is the gyroangle here and NOT the toroidal angle
-    integer :: ir, iz, ie, ip, iphi, nphi
+!!! Need to double check the itphi stuff with Luke
+    integer :: ir, itphi, iz, ie, ip, iphi, nphi
     type(LocalProfiles) :: plasma
     type(LocalEMFields) :: fields
     real(Float64) :: eb,pitch,r,z
@@ -9468,48 +9467,50 @@ subroutine neutron_f
 
     nphi = 20
     !$OMP PARALLEL DO schedule(guided) private(fields,vi,ri,rg,pitch,eb,&
-    !$OMP& ir,iz,ie,ip,iphi,plasma,factor,uvw,uvw_vi,vnet_square,rate,erel)
+    !$OMP& ir,itphi,iz,ie,ip,iphi,plasma,factor,uvw,uvw_vi,vnet_square,rate,erel)
     z_loop: do iz = istart, fbm%nz, istep
-        r_loop: do ir=1, fbm%nr
-            !! Calculate position
-            uvw(1) = fbm%r(ir)
-            uvw(2) = 0.d0
-            uvw(3) = fbm%z(iz)
-            call uvw_to_xyz(uvw, rg)
+        tphi_loop: do itphi = 1, fbm%nphi
+            r_loop: do ir=1, fbm%nr
+                !! Calculate position
+                uvw(1) = fbm%r(ir)
+                uvw(2) = 0.d0
+                uvw(3) = fbm%z(iz)
+                call uvw_to_xyz(uvw, rg)
 
-            !! Get fields
-            call get_fields(fields,pos=rg)
-            if(.not.fields%in_plasma) cycle r_loop
+                !! Get fields
+                call get_fields(fields,pos=rg)
+                if(.not.fields%in_plasma) cycle r_loop
 
-            factor = 2*pi*fbm%r(ir)*fbm%dE*fbm%dp*fbm%dr*fbm%dz/nphi
-            !! Loop over energy/pitch/phi
-            pitch_loop: do ip = 1, fbm%npitch
-                pitch = fbm%pitch(ip)
-                energy_loop: do ie =1, fbm%nenergy
-                    eb = fbm%energy(ie)
-                    gyro_loop: do iphi=1, nphi
-                        call gyro_correction(fields,eb,pitch,ri,vi)
+                factor = 2*pi*fbm%r(ir)*fbm%dE*fbm%dp*fbm%dr*fbm%dz/nphi
+                !! Loop over energy/pitch/phi
+                pitch_loop: do ip = 1, fbm%npitch
+                    pitch = fbm%pitch(ip)
+                    energy_loop: do ie =1, fbm%nenergy
+                        eb = fbm%energy(ie)
+                        gyro_loop: do iphi=1, nphi
+                            call gyro_correction(fields,eb,pitch,ri,vi)
 
-                        !! Get plasma parameters at particle position
-                        call get_plasma(plasma,pos=ri)
-                        if(.not.plasma%in_plasma) cycle gyro_loop
+                            !! Get plasma parameters at particle position
+                            call get_plasma(plasma,pos=ri)
+                            if(.not.plasma%in_plasma) cycle gyro_loop
 
-                        !! Calculate effective beam energy
-                        vnet_square=dot_product(vi-plasma%vrot,vi-plasma%vrot)  ![cm/s]
-                        erel = v2_to_E_per_amu*inputs%ab*vnet_square ![kev]
+                            !! Calculate effective beam energy
+                            vnet_square=dot_product(vi-plasma%vrot,vi-plasma%vrot)  ![cm/s]
+                            erel = v2_to_E_per_amu*inputs%ab*vnet_square ![kev]
 
-                        !! Get neutron production rate
-                        call get_neutron_rate(plasma, erel, rate)
-                        neutron%weight(ie,ip,ir,iz) = neutron%weight(ie,ip,ir,iz) &
-                                                    + rate*factor
-                        rate = rate*fbm%f(ie,ip,ir,iz)*factor
+                            !! Get neutron production rate
+                            call get_neutron_rate(plasma, erel, rate)
+                            neutron%weight(ie,ip,ir,iz) = neutron%weight(ie,ip,ir,iz) &
+                                                        + rate*factor
+                            rate = rate*fbm%f(ie,ip,ir,itphi,iz)*factor
 
-                        !! Store neutrons
-                        call store_neutrons(rate)
-                    enddo gyro_loop
-                enddo energy_loop
-            enddo pitch_loop
-        enddo r_loop
+                            !! Store neutrons
+                            call store_neutrons(rate)
+                        enddo gyro_loop
+                    enddo energy_loop
+                enddo pitch_loop
+            enddo r_loop
+        enddo tphi_loop
     enddo z_loop
     !$OMP END PARALLEL DO
 

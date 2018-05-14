@@ -2534,7 +2534,7 @@ subroutine read_equilibrium
     integer :: n = 50
 
     integer, dimension(:,:,:), allocatable :: p_mask, f_mask
-    real(Float64), dimension(:,:), allocatable :: denn2d
+    real(Float64), dimension(:,:,:), allocatable :: denn3d
 
     !!Initialize HDF5 interface
     call h5open_f(error)
@@ -2555,11 +2555,8 @@ subroutine read_equilibrium
     allocate(inter_grid%z2d(inter_grid%nr,inter_grid%nz))
     allocate(p_mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
     allocate(f_mask(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
-!!! how do I deal with the neutral for inter_grid%nphi
-    allocate(denn2d(inter_grid%nr,inter_grid%nz))
-!!! End
+    allocate(denn3d(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
 
-!!! Also breaking things
     dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 
 !!! Not sure how dims is being indexed below
@@ -2596,7 +2593,7 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/plasma/vr", equil%plasma%vr, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/vt", equil%plasma%vt, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/vz", equil%plasma%vz, dims, error)
-    call h5ltread_dataset_double_f(gid, "/plasma/denn", denn2d, dims, error)
+    call h5ltread_dataset_double_f(gid, "/plasma/denn", denn3d, dims, error)
     call h5ltread_dataset_int_f(gid, "/plasma/mask", p_mask, dims,error)
 
     impc = inputs%impurity_charge
@@ -2620,8 +2617,8 @@ subroutine read_equilibrium
         equil%plasma%ti = 0.0
     endwhere
 
-    where(denn2d.lt.0.0)
-        denn2d = 0.0
+    where(denn3d.lt.0.0)
+        denn3d = 0.0
     endwhere
 
     equil%plasma%denimp = ((equil%plasma%zeff-1.d0)/(impc*(impc-1.d0)))*equil%plasma%dene
@@ -2644,9 +2641,8 @@ subroutine read_equilibrium
             rates_avg = rates_avg + rates/n
         enddo
         if(sum(rates_avg).le.0.0) cycle loop_over_cells
-!!! I think I may need to put something here for the densities.
-!!! i.e. define them in 3D
-        equil%plasma(ir,iz,iphi)%denn = denn2d(ir,iz)*(rates_avg)/sum(rates_avg)
+!!! Still unsure if denn2d should go to denn3d 
+        equil%plasma(ir,iz,iphi)%denn = denn3d(ir,iz,iphi)*(rates_avg)/sum(rates_avg)
 !!! End
     enddo loop_over_cells
 

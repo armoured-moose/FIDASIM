@@ -344,7 +344,7 @@ type, extends( EMFields ) :: LocalEMFields
         !+ Vector perpendicular to `b_norm` and `a_norm`
     real(Float64), dimension(3) :: e_norm = 0.d0
         !+ Direction of electric field in beam grid coordinates
-    type(InterpolCoeffs2D) :: c
+!!!    type(InterpolCoeffs2D) :: c
         !+ Linear Interpolation Coefficients and indicies for interpolation at `pos`
     type(InterpolCoeffs3D) :: b
         !+ Cylindrical Interpolation Coefficients and indicies for interpolation at `pos`
@@ -9763,7 +9763,7 @@ subroutine fida_weights_mc
 
             fbm_denf = 0.0
             if (inputs%dist_type.eq.1) then
-                call get_ep_denf(energy,pitch,fbm_denf,coeffs=fields%c)
+                call get_ep_denf(energy,pitch,fbm_denf,coeffs=fields%b)
             endif
 
             !! Find the particles path through the beam grid
@@ -9918,7 +9918,7 @@ subroutine fida_weights_los
                         if (inputs%dist_type.eq.1) then
                             do ipitch=1,inputs%np_wght
                                 do ienergy=1,inputs%ne_wght
-                                    call get_ep_denf(ebarr(ienergy),ptcharr(ipitch),denf,coeffs=fields_cell%c)
+                                    call get_ep_denf(ebarr(ienergy),ptcharr(ipitch),denf,coeffs=fields_cell%b)
                                     mean_f(ienergy,ipitch) = mean_f(ienergy,ipitch) + wght*denf
                                 enddo
                             enddo

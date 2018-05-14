@@ -352,10 +352,8 @@ type Equilibrium
         !+ Electro-magnetic fields at points defined in [[libfida:inter_grid]]
     type(Profiles), dimension(:,:,:), allocatable :: plasma
         !+ Plasma parameters at points defined in [[libfida:inter_grid]]
-!!! Suspicious that this did not break anything. Need to test mask more 
     real(Float64), dimension(:,:,:), allocatable  :: mask
         !+ Indicates whether fields and plasma are well-defined at points defined in [[libfida:inter_grid]]
-!!! End
 end type Equilibrium
 
 type FastIonDistribution
@@ -1041,15 +1039,12 @@ interface operator(/)
 end interface
 
 interface interpol_coeff
-    !+ Calculates linear interpolation coefficients
+    !+ Calculates interpolation coefficients
     module procedure interpol1D_coeff, interpol1D_coeff_arr
     module procedure interpol2D_coeff, interpol2D_coeff_arr
-end interface
-
-interface cyl_interpol3D_coeff
-    !+ Calculates 3-D cylindrical interpolation coefficients
     module procedure cyl_interpol3D_coeff, cyl_interpol3D_coeff_arr
 end interface
+
 
 interface interpol
     !+ Performs linear/bilinear interpolation
@@ -2530,7 +2525,7 @@ subroutine read_equilibrium
     integer(HID_T) :: fid, gid
     integer(HSIZE_T), dimension(3) :: dims 
 
-    integer :: impc, ic, ir, iz, it, ind(2)
+    integer :: impc, ic, ir, iz, iphi, it, ind(3)
     type(LocalProfiles) :: plasma
     real(Float64) :: photons
     real(Float64), dimension(nlevs) :: rates, denn, rates_avg
@@ -2632,28 +2627,28 @@ subroutine read_equilibrium
     equil%plasma%denimp = ((equil%plasma%zeff-1.d0)/(impc*(impc-1.d0)))*equil%plasma%dene
     equil%plasma%denp = equil%plasma%dene - impc*equil%plasma%denimp
 
-!!! This loop is going to get completely wrecked.
- !!!   loop_over_cells: do ic=1, inter_grid%nr*inter_grid%nz
- !!!       call ind2sub(inter_grid%dims,ic,ind)
- !!!       ir = ind(1) ; iz = ind(2)
- !!!       if(p_mask(ir,iz).lt.0.5) cycle loop_over_cells
- !!!       plasma = equil%plasma(ir,iz)
- !!!       plasma%vrot = [plasma%vr, plasma%vt, plasma%vz]
- !!!       plasma%in_plasma = .True.
-
- !!!       rates_avg = 0.0
- !!!       do it=1,n
- !!!           rates = 0.0
- !!!           rates(1) = 1.d19
- !!!           call randn(random3)
- !!!           vi = plasma%vrot + sqrt(plasma%ti*0.5/(v2_to_E_per_amu*inputs%ai))*random3
- !!!           call colrad(plasma, thermal_ion, vi, 1.0d-7, rates, denn, photons)
- !!!           rates_avg = rates_avg + rates/n
- !!!       enddo
- !!!       if(sum(rates_avg).le.0.0) cycle loop_over_cells
- !!!       equil%plasma(ir,iz)%denn = denn2d(ir,iz)*(rates_avg)/sum(rates_avg)
- !!!   enddo loop_over_cells
+    loop_over_cells: do ic=1, inter_grid%nr*inter_grid%nz*inter_grid%nphi
+        call ind2sub(inter_grid%dims,ic,ind)
+        ir = ind(1) ; iz = ind(2) ; iphi = ind(3)
+        if(p_mask(ir,iz,iphi).lt.0.5) cycle loop_over_cells
+        plasma = equil%plasma(ir,iz,iphi)
+        plasma%vrot = [plasma%vr, plasma%vt, plasma%vz]
+        plasma%in_plasma = .True.
+        rates_avg = 0.0
+        do it=1,n
+            rates = 0.0
+            rates(1) = 1.d19
+            call randn(random3)
+            vi = plasma%vrot + sqrt(plasma%ti*0.5/(v2_to_E_per_amu*inputs%ai))*random3
+            call colrad(plasma, thermal_ion, vi, 1.0d-7, rates, denn, photons)
+            rates_avg = rates_avg + rates/n
+        enddo
+        if(sum(rates_avg).le.0.0) cycle loop_over_cells
+!!! I think I may need to put something here for the densities.
+!!! i.e. define them in 3D
+        equil%plasma(ir,iz,iphi)%denn = denn2d(ir,iz)*(rates_avg)/sum(rates_avg)
 !!! End
+    enddo loop_over_cells
 
     !!Close PLASMA group
     call h5gclose_f(gid, error)
@@ -2670,7 +2665,7 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/fields/er", equil%fields%er, dims, error)
     call h5ltread_dataset_double_f(gid, "/fields/et", equil%fields%et, dims, error)
     call h5ltread_dataset_double_f(gid, "/fields/ez", equil%fields%ez, dims, error)
-!@   call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
+    call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
     !!Calculate B field derivatives
 !!! Need to change dimensions of the derivative to 3-D?
@@ -5831,7 +5826,6 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
     j = floor((phip-phimin)/dphi)+1
     k = floor((zp-zmin)/dz)+1
 
-!!! I should double check this if condition at some point
     if ((((i.gt.0).and.(i.le.(nr-1))).and.((j.gt.0).and.(j.le.(nphi-1)))).and.((k.gt.0).and.(k.le.(nz-1)))) then
         r1 = rmin + (i-1)*dr
         r2 = r1 + dr
@@ -5881,7 +5875,6 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
 
     real(Float64) :: rmin, phimin, zmin, dr, dphi, dz
     integer :: sr, sphi, sz, err_status
-    !!! Do I needd to bound the phi value here?
     err_status = 1
     sr = size(r)
     sphi = size(phi)
@@ -6051,9 +6044,7 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
         b = coeffs
         err_status = 0
     else
-!!! Will need to change later on after remerge
-        call cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,b,err)
-!!! End
+        call interpol_coeff(r,phi,z,rout,phiout,zout,b,err)
     endif
 
     if(err_status.eq.0) then
@@ -6104,7 +6095,7 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
         b = coeffs
         err_status = 0
     else
-        call cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,b,err)
+        call interpol_coeff(r,phi,z,rout,phiout,zout,b,err)
     endif
 
     if(err_status.eq.0) then
@@ -6141,7 +6132,6 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         !+ Position in machine coordinates
 
     real(Float64), dimension(3) :: uvw
-!@    type(InterpolCoeffs2D) :: c
     type(InterpolCoeffs3D) :: b
     real(Float64) :: R, phi, W, mask
     logical :: mc
@@ -6162,21 +6152,17 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
     W = uvw(3)
     phi = atan2(uvw(2),uvw(1))
     !! Interpolate mask value
-!!! When I change the interface later on, this will need to change with it
-    call cyl_interpol3D_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
-!!! End
+    call interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
 
     inp = .False.
     if(err.eq.0) then
         i = b%i
         j = b%j
         k = b%k
-!!! Double check this
         mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k+1) + &
             b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k+1) + &
             b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k+1) + &
             b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k+1)
-!!! End
 
         if((mask.ge.0.5).and.(err.eq.0)) then
             inp = .True.
@@ -6215,12 +6201,10 @@ subroutine get_plasma(plasma, pos, ind)
         j = coeffs%j
         k = coeffs%k
 
-!!! Double check this
         plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j,k+1) + &
             coeffs%b121*equil%plasma(i,j+1,k) + coeffs%b122*equil%plasma(i,j+1,k+1) + &
             coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b212*equil%plasma(i+1,j,k+1) + &
             coeffs%b221*equil%plasma(i+1,j+1,k) + coeffs%b222*equil%plasma(i+1,j+1,k+1)
-!!! End
 
         s = sin(phi) ; c = cos(phi)
         vrot_uvw(1) = plasma%vr*c - plasma%vt*s

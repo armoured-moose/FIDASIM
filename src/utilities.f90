@@ -94,6 +94,7 @@ interface deriv
     !+ Procedure for finding derivatives from an array
     module procedure deriv_1d
     module procedure deriv_2d
+    module procedure deriv_3d
 end interface
 
 contains
@@ -803,6 +804,44 @@ subroutine deriv_2d(x,y,z,zxp,zyp)
     enddo
 
 end subroutine deriv_2d
+
+subroutine deriv_3d(r,phi,z,f,frp,fphip,fzp)
+    !+ Uses 3 point lagrangian method to calculate the partial derivative
+    !+ of an array F w.r.t R, Phi and Z
+    real(Float64), dimension(:), intent(in)  :: r
+        !+ R Values
+    real(Float64), dimension(:), intent(in)  :: phi
+        !+ Phi Values
+    real(Float64), dimension(:), intent(in)  :: z
+        !+ Z Values
+    real(Float64), dimension(:,:,:), intent(in)  :: f
+        !+ F Values
+    real(Float64), dimension(:,:,:), intent(out) :: frp
+        !+ Derivative of F w.r.t. R
+    real(Float64), dimension(:,:,:), intent(out) :: fphip
+        !+ Derivative of F w.r.t. Phi
+    real(Float64), dimension(:,:,:), intent(out) :: fzp
+        !+ Derivative of F w.r.t. Z
+
+    integer :: i,n
+        !! temporary values for loops
+
+    n = size(phi)
+    do i = 1,n
+        call deriv_2d(r,z,f(:,:,i),frp(:,:,i),fzp(:,:,i))
+    enddo
+
+    n = size(z)
+    do i = 1,n
+        call deriv_2d(r,phi,f(:,i,:),frp(:,i,:),fphip(:,i,:))
+    enddo
+
+    n = size(r)
+    do i = 1,n
+        call deriv_2d(z,phi,f(i,:,:),fzp(i,:,:),fphip(i,:,:))
+    enddo
+
+end subroutine deriv_3d
 
 !============================================================================
 !------------------------------ Misc. Routines ------------------------------

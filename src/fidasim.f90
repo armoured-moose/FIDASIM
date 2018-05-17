@@ -232,8 +232,9 @@ type InterpolationGrid
         !+ Vertical spacing [cm]
     real(Float64)  :: da
         !+ Grid element area [\(cm^2\)]
-    real(Float64), dimension(:,:,:),   allocatable :: dv
-        !+ Cell volumes [\(cm^3\)]
+    real(Float64)  :: dv
+        !+ Grid element volume [\(cm^2\)]
+        !!! Without r factor
     integer(Int32) :: dims(3)
         !+ Dimension of the interpolation grid
     real(Float64), dimension(:),   allocatable :: r
@@ -308,14 +309,20 @@ type EMFields
         !+ Vertical electric field [V/m]
     real(Float64) :: dbr_dr = 0.d0
         !+ Radial derivative of the radial magnetic field [T/m]
+    real(Float64) :: dbr_dphi = 0.d0
+        !+ Angular derivative of the radial magnetic field [T/m]
     real(Float64) :: dbr_dz = 0.d0
         !+ Vertical derivative of the radial magnetic field [T/m]
     real(Float64) :: dbt_dr = 0.d0
         !+ Radial derivative of the torodial magnetic field [T/m]
+    real(Float64) :: dbt_dphi = 0.d0
+        !+ Angular derivative of the torodial magnetic field [T/m]
     real(Float64) :: dbt_dz = 0.d0
         !+ Vertical derivative of the torodial magnetic field [T/m]
     real(Float64) :: dbz_dr = 0.d0
         !+ Radial derivative of the radial magnetic field [T/m]
+    real(Float64) :: dbz_dphi = 0.d0
+        !+ Angular derivative of the radial magnetic field [T/m]
     real(Float64) :: dbz_dz = 0.d0
         !+ Vertical derivative of the vertical magnetic field [T/m]
 end type EMFields
@@ -357,7 +364,7 @@ type Equilibrium
 end type Equilibrium
 
 type FastIonDistribution
-    !+ Defines a Guiding Center Fast-ion Distribution Function: F(E,p,R,Z)
+    !+ Defines a Guiding Center Fast-ion Distribution Function: F(E,p,R,Z,Phi)
     integer(Int32) :: nenergy
         !+ Number of energies
     integer(Int32) :: npitch
@@ -812,8 +819,8 @@ type NeutronRate
     !+ Neutron storage structure
     real(Float64), dimension(:), allocatable :: rate
         !+ Neutron rate: rate(orbit_type) [neutrons/sec]
-    real(Float64), dimension(:,:,:,:), allocatable :: weight
-        !+ Neutron rate weight: weight(E,p,R,Z)
+    real(Float64), dimension(:,:,:,:,:), allocatable :: weight
+        !+ Neutron rate weight: weight(E,p,R,Z,Phi)
 end type NeutronRate
 
 type NeutralDensity
@@ -2559,7 +2566,6 @@ subroutine read_equilibrium
 
     dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 
-!!! Not sure how dims is being indexed below
     call h5ltread_dataset_double_f(gid, "/plasma/r", inter_grid%r, dims(1:1), error)
     call h5ltread_dataset_double_f(gid, "/plasma/phi", inter_grid%phi, dims(3:3), error)
     call h5ltread_dataset_double_f(gid, "/plasma/z", inter_grid%z, dims(2:2), error)
@@ -2570,15 +2576,15 @@ subroutine read_equilibrium
     inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
     inter_grid%dz = abs(inter_grid%z(2)-inter_grid%z(1))
     inter_grid%da = inter_grid%dr*inter_grid%dz
+    !!! Omitting the r factor
+    inter_grid%dv = inter_grid%dr*inter_grid%dphi*inter_grid%dz
 
     if(inputs%verbose.ge.1) then
         write(*,'(a)') '---- Interpolation grid settings ----'
         write(*,'(T2,"Nr: ",i3)') inter_grid%nr
         write(*,'(T2,"Nphi: ",i3)') inter_grid%nphi
         write(*,'(T2,"Nz: ",i3)') inter_grid%nz
-!!! Perhaps the da is redundant now
         write(*,'(T2,"dA: ", f5.2," [cm^2]")') inter_grid%da
-!!! End
         write(*,'(T2,"dV: ", f5.2," [cm^3]")') inter_grid%dv
         write(*,*) ''
     endif
@@ -2641,9 +2647,7 @@ subroutine read_equilibrium
             rates_avg = rates_avg + rates/n
         enddo
         if(sum(rates_avg).le.0.0) cycle loop_over_cells
-!!! Still unsure if denn2d should go to denn3d 
         equil%plasma(ir,iz,iphi)%denn = denn3d(ir,iz,iphi)*(rates_avg)/sum(rates_avg)
-!!! End
     enddo loop_over_cells
 
     !!Close PLASMA group
@@ -2663,12 +2667,14 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/fields/ez", equil%fields%ez, dims, error)
     call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
+!!! I think this is working, but I should double check that the storage is fine
     !!Calculate B field derivatives
-!!! Need to change dimensions of the derivative to 3-D?
-    call deriv(inter_grid%r, inter_grid%z, equil%fields%br, equil%fields%dbr_dr, equil%fields%dbr_dz)
-    call deriv(inter_grid%r, inter_grid%z, equil%fields%bt, equil%fields%dbt_dr, equil%fields%dbt_dz)
-    call deriv(inter_grid%r, inter_grid%z, equil%fields%bz, equil%fields%dbz_dr, equil%fields%dbz_dz)
-!!! End
+    call deriv(inter_grid%r, inter_grid%phi, inter_grid%z, equil%fields%br, &
+        equil%fields%dbr_dr, equil%fields%dbr_dphi, equil%fields%dbr_dz)
+    call deriv(inter_grid%r, inter_grid%phi, inter_grid%z, equil%fields%bt, &
+        equil%fields%dbt_dr, equil%fields%dbt_dphi, equil%fields%dbt_dz)
+    call deriv(inter_grid%r, inter_grid%phi, inter_grid%z, equil%fields%bz, &
+        equil%fields%dbz_dr, equil%fields%dbz_dphi, equil%fields%dbz_dz)
 
     !!Close FIELDS group
     call h5gclose_f(gid, error)
@@ -2751,7 +2757,7 @@ subroutine read_f(fid, error)
     enddo
 
     if(inputs%verbose.ge.1) then
-        write(*,'(T2,"Distribution type: ",a)') "Fast-ion Density Function F(energy,pitch,R,Z)"
+        write(*,'(T2,"Distribution type: ",a)') "Fast-ion Density Function F(energy,pitch,R,Z,Phi)"
         write(*,'(T2,"Nenergy = ",i3)') fbm%nenergy
         write(*,'(T2,"Npitch  = ",i3)') fbm%npitch
         write(*,'(T2,"Energy range = [",f5.2,",",f6.2,"]")') fbm%emin,fbm%emax
@@ -2770,9 +2776,7 @@ subroutine read_mc(fid, error)
         !+ Error code
 
     integer(HSIZE_T), dimension(1) :: dims
-!!! iphi used for stuff below
     integer(Int32) :: i,j,ii,ir,iz,iphi
-!!! End
     real(Float64) :: phi,phi_enter,phi_exit,delta_phi
     real(Float64), dimension(3) :: uvw,ri,vi,e1_xyz,e2_xyz,C_xyz,dum
     integer(Int32), dimension(1) :: minpos
@@ -2826,9 +2830,7 @@ subroutine read_mc(fid, error)
     cnt=0
     e1_xyz = matmul(beam_grid%inv_basis,[1.0,0.0,0.0])
     e2_xyz = matmul(beam_grid%inv_basis,[0.0,1.0,0.0])
-!!! No idea what this does. Inputting iphi below
     !$OMP PARALLEL DO schedule(guided) private(i,ii,j,ir,iz,iphi,minpos,fields,uvw,phi,ri,vi, &
-!!! End
     !$OMP& delta_phi,phi_enter,phi_exit,C_xyz)
     particle_loop: do i=1,particles%nparticle
         if(inputs%verbose.ge.2) then
@@ -2861,13 +2863,8 @@ subroutine read_mc(fid, error)
         minpos = minloc(abs(inter_grid%z - particles%fast_ion(i)%z))
         iz = minpos(1)
         !$OMP CRITICAL(mc_denf)
-!!! Not really sure what this is doing, but I'm going to incorporate to make the
-!!! error go away
-!!!     Looks like I may need to change that normalization thing to dv or
-!!!     something like it
         equil%plasma(ir,iz,iphi)%denf = equil%plasma(ir,iz,iphi)%denf + weight(i) / &
-                                   (2*pi*particles%fast_ion(i)%r*inter_grid%da)
-!!! End
+                                   (particles%fast_ion(i)%r*inter_grid%dv)
         !$OMP END CRITICAL(mc_denf)
         cnt=cnt+1
     enddo particle_loop
@@ -4187,7 +4184,7 @@ subroutine write_neutrons
     !+ Writes [[libfida:neutron]] to a HDF5 file
     integer(HID_T) :: fid
     integer(HSIZE_T), dimension(1) :: dim1
-    integer(HSIZE_T), dimension(4) :: dim4
+    integer(HSIZE_T), dimension(5) :: dim5
     integer :: error
 
     character(charlim) :: filename
@@ -4223,12 +4220,13 @@ subroutine write_neutrons
         call h5ltmake_dataset_int_f(fid,"/npitch",0,dim1,[fbm%npitch], error)
         call h5ltmake_dataset_int_f(fid,"/nr",0,dim1,[fbm%nr], error)
         call h5ltmake_dataset_int_f(fid,"/nz",0,dim1,[fbm%nz], error)
-        dim4 = shape(neutron%weight)
-        call h5ltmake_compressed_dataset_double_f(fid, "/weight", 4, dim4, neutron%weight, error)
-        call h5ltmake_compressed_dataset_double_f(fid,"/energy", 1, dim4(1:1), fbm%energy, error)
-        call h5ltmake_compressed_dataset_double_f(fid,"/pitch", 1, dim4(2:2), fbm%pitch, error)
-        call h5ltmake_compressed_dataset_double_f(fid,"/r", 1, dim4(3:3), fbm%r, error)
-        call h5ltmake_compressed_dataset_double_f(fid,"/z", 1, dim4(4:4), fbm%z, error)
+        dim5 = shape(neutron%weight)
+        call h5ltmake_compressed_dataset_double_f(fid, "/weight", 5, dim5, neutron%weight, error)
+        call h5ltmake_compressed_dataset_double_f(fid,"/energy", 1, dim5(1:1), fbm%energy, error)
+        call h5ltmake_compressed_dataset_double_f(fid,"/pitch", 1, dim5(2:2), fbm%pitch, error)
+        call h5ltmake_compressed_dataset_double_f(fid,"/r", 1, dim5(3:3), fbm%r, error)
+        call h5ltmake_compressed_dataset_double_f(fid,"/z", 1, dim5(4:4), fbm%z, error)
+        call h5ltmake_compressed_dataset_double_f(fid,"/phi", 1, dim5(5:5), fbm%phi, error)
 
         call h5ltset_attribute_string_f(fid,"/nenergy", "description", &
              "Number of energy values", error)
@@ -4239,7 +4237,7 @@ subroutine write_neutrons
         call h5ltset_attribute_string_f(fid,"/nz", "description", &
              "Number of Z values", error)
         call h5ltset_attribute_string_f(fid,"/weight", "description", &
-             "Neutron Weight Function: weight(E,p,R,Z), rate = sum(f*weight)", error)
+             "Neutron Weight Function: weight(E,p,R,Z,Phi), rate = sum(f*weight)", error)
         call h5ltset_attribute_string_f(fid,"/weight", "units","neutrons*cm^3*dE*dp/fast-ion*s", error)
 
         call h5ltset_attribute_string_f(fid,"/energy","description", &
@@ -7487,11 +7485,13 @@ subroutine gyro_step(vi, fields, r_gyro)
         term1 = vpar*one_over_omega*dot_product(b_rtz,cuvrxb)
         grad_B(1) = (fields%br*fields%dbr_dr + fields%bt * fields%dbt_dr + fields%bz*fields%dbz_dr)/&
                     fields%b_abs
-        grad_B(2) = 0.0
+        grad_B(2) = (fields%br*fields%dbr_dphi + fields%bt * fields%dbt_dphi + fields%bz*fields%dbz_dphi)/&
+                    fields%b_abs
         grad_B(3) = (fields%br*fields%dbr_dz + fields%bt * fields%dbt_dz + fields%bz*fields%dbz_dz)/&
                     fields%b_abs
         rg_rtz(1) = rg_uvw(1)*cos(phi) + rg_uvw(2)*sin(phi)
-        rg_rtz(2) = 0.0
+!!! This seems like a matrix transformation, but I should double check this
+        rg_rtz(2) = -rg_uvw(1)*sin(phi) + rg_uvw(2)*cos(phi)
         rg_rtz(3) = rg_uvw(3)
         term2 = -1.0 / (2.0 * fields%b_abs)*dot_product(rg_rtz,grad_B)
         r_gyro = r_gyro * (1.0 - term1 - term2)
@@ -9386,7 +9386,6 @@ end subroutine pnpa_mc
 
 subroutine neutron_f
     !+ Calculate neutron emission rate using a fast-ion distribution function F(E,p,r,z)
-!!! Need to double check the itphi stuff with Luke
     integer :: ir, itphi, iz, ie, ip, iphi, nphi
     type(LocalProfiles) :: plasma
     type(LocalEMFields) :: fields
@@ -9397,7 +9396,7 @@ subroutine neutron_f
     real(Float64), dimension(3) :: uvw, uvw_vi
     real(Float64)  :: vnet_square, factor
 
-    allocate(neutron%weight(fbm%nenergy,fbm%npitch,fbm%nr,fbm%nz))
+    allocate(neutron%weight(fbm%nenergy,fbm%npitch,fbm%nr,fbm%nz,fbm%nphi))
     neutron%weight = 0.d0
 
     nphi = 20
@@ -9435,7 +9434,7 @@ subroutine neutron_f
 
                             !! Get neutron production rate
                             call get_neutron_rate(plasma, erel, rate)
-                            neutron%weight(ie,ip,ir,iz) = neutron%weight(ie,ip,ir,iz) &
+                            neutron%weight(ie,ip,ir,iz,itphi) = neutron%weight(ie,ip,ir,iz,itphi) &
                                                         + rate*factor
                             rate = rate*fbm%f(ie,ip,ir,itphi,iz)*factor
 

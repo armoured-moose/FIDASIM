@@ -2703,7 +2703,7 @@ subroutine read_f(fid, error)
     integer, intent(out)          :: error
         !+ Error code
 
-    integer(HSIZE_T), dimension(4) :: dims
+    integer(HSIZE_T), dimension(5) :: dims
     real(Float64) :: dummy(1)
     integer :: ir
 
@@ -2715,7 +2715,9 @@ subroutine read_f(fid, error)
     call h5ltread_dataset_int_scalar_f(fid,"/npitch", fbm%npitch, error)
     call h5ltread_dataset_int_scalar_f(fid,"/nr", fbm%nr, error)
     call h5ltread_dataset_int_scalar_f(fid,"/nz", fbm%nz, error)
+    call h5ltread_dataset_int_scalar_f(fid,"/nphi", fbm%nphi, error)
 
+!!!    if(((fbm%nr.ne.inter_grid%nr).or.(fbm%nz.ne.inter_grid%nz)).or.(fbm%nphi.ne.inter_grid%nphi)) then
     if((fbm%nr.ne.inter_grid%nr).or.(fbm%nz.ne.inter_grid%nz)) then
         if(inputs%verbose.ge.0) then
             write(*,'(a)') "READ_F: Distribution file has incompatable grid dimensions"
@@ -2723,23 +2725,40 @@ subroutine read_f(fid, error)
         error stop
     endif
 
-    allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz))
-    allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
-    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
+    allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz), fbm%phi(fbm%nphi))
+!!! if fbm%nphi doesn't exit, the code needs to run in 2-D 
+!!!    allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
+!!!    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
+    allocate(fbm%denf(fbm%nr, fbm%nz))
+    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz))
 
-    dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz]
+    dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi]
     call h5ltread_dataset_double_f(fid, "/energy", fbm%energy, dims(1:1), error)
     call h5ltread_dataset_double_f(fid, "/pitch", fbm%pitch, dims(2:2), error)
     call h5ltread_dataset_double_f(fid, "/r", fbm%r, dims(3:3), error)
     call h5ltread_dataset_double_f(fid, "/z", fbm%z, dims(4:4), error)
+    call h5ltread_dataset_double_f(fid, "/phi", fbm%phi, dims(5:5), error)
+!!! May need to change dims below
     call h5ltread_dataset_double_f(fid, "/denf",fbm%denf, dims(3:4), error)
-    call h5ltread_dataset_double_f(fid, "/f", fbm%f, dims, error)
+    call h5ltread_dataset_double_f(fid, "/f", fbm%f, dims(1:4), error)
+!!! End
     equil%plasma%denf = fbm%denf
 
     fbm%dE = abs(fbm%energy(2) - fbm%energy(1))
     fbm%dp = abs(fbm%pitch(2) - fbm%pitch(1))
     fbm%dr = abs(fbm%r(2) - fbm%r(1))
     fbm%dz = abs(fbm%z(2) - fbm%z(1))
+!!! This might need to be intergrid instead
+ !!!   if(fbm%nphi.eq.1) then
+!!! Need to be careful below, I think dphi is used for normalizing later on. I
+!!! may need to set this to 2*pi
+ !!!       fbm%dphi = 0.0d0
+!!!        fbm%denf = spread(fbm%denf, 3, 1)
+!!!        fbm%f = spread(fbm%f, 5, 1)
+!!! End
+ !!!   else
+ !!!       fbm%dphi = abs(fbm%phi(2) - fbm%phi(1))
+ !!!   endif
 
     dummy = minval(fbm%energy)
     fbm%emin = dummy(1)
@@ -2752,9 +2771,16 @@ subroutine read_f(fid, error)
     fbm%pmax = dummy(1)
     fbm%p_range = fbm%pmax - fbm%pmin
 
-    do ir=1,fbm%nr
-        fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
-    enddo
+!!! I missed the 2*pi normalization below. Need to consider this below.
+ !!!   if(fbm%nphi.eq.1) then
+ !!!       do ir=1,fbm%nr
+ !!!           fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
+ !!!       enddo
+ !!!   else
+ !!!       do ir=1,fbm%nr
+ !!!           fbm%n_tot = fbm%n_tot + fbm%dr*fbm%dz*fbm%dphi*sum(fbm%denf(ir,:,:))*fbm%r(ir)
+ !!!       enddo
+ !!!   endif
 
     if(inputs%verbose.ge.1) then
         write(*,'(T2,"Distribution type: ",a)') "Fast-ion Density Function F(energy,pitch,R,Z,Phi)"
@@ -9415,6 +9441,8 @@ subroutine neutron_f
                 call get_fields(fields,pos=rg)
                 if(.not.fields%in_plasma) cycle r_loop
 
+!!! Might need to multiply by dphi below. I should also check the output of
+!!! this whole neutron stuff because it is what I don't understand most 
                 factor = 2*pi*fbm%r(ir)*fbm%dE*fbm%dp*fbm%dr*fbm%dz/nphi
                 !! Loop over energy/pitch/phi
                 pitch_loop: do ip = 1, fbm%npitch

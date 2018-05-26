@@ -140,10 +140,13 @@ FUNCTION read_nubeam,filename,grid,btipsign=btipsign,e_range=e_range,p_range=p_r
     ;; ------map fdens on FIDASIM grid and sort out
     ;; ------points outside the separatrix
     nr=grid.nr
+    nphi=grid.nphi
     nz=grid.nz
     rgrid=grid.r
+    phigrid=grid.phi
     zgrid=grid.z
     dr = abs(rgrid[1]-rgrid[0])
+    dphi = 0.01 + phigrid[0]
     dz = abs(zgrid[1]-zgrid[0])
     
     ;; FBM & DENF

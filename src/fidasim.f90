@@ -2555,6 +2555,7 @@ subroutine read_equilibrium
     !!Read in interpolation grid
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nr", inter_grid%nr, error)
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nz", inter_grid%nz, error)
+    call h5ltread_dataset_int_scalar_f(gid, "/plasma/nphi", inter_grid%nphi, error)
     inter_grid%dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 
     allocate(inter_grid%r(inter_grid%nr),inter_grid%z(inter_grid%nz),inter_grid%phi(inter_grid%nphi))
@@ -2573,11 +2574,15 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/plasma/z2d", inter_grid%z2d, dims, error)
 
     inter_grid%dr = abs(inter_grid%r(2)-inter_grid%r(1))
+!!! Probably need to insert if statement for dphi
     inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
+!!! End
     inter_grid%dz = abs(inter_grid%z(2)-inter_grid%z(1))
+!!! Put an if statement here for dphi as well
     inter_grid%da = inter_grid%dr*inter_grid%dz
     !!! Omitting the r factor
     inter_grid%dv = inter_grid%dr*inter_grid%dphi*inter_grid%dz
+!!! End
 
     if(inputs%verbose.ge.1) then
         write(*,'(a)') '---- Interpolation grid settings ----'
@@ -2592,6 +2597,7 @@ subroutine read_equilibrium
     !!Read in plasma parameters
     allocate(equil%plasma(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
 
+!!! This is where the plasma parameters are read in
     call h5ltread_dataset_double_f(gid, "/plasma/dene", equil%plasma%dene, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/te", equil%plasma%te, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/ti", equil%plasma%ti, dims, error)
@@ -2601,6 +2607,7 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/plasma/vz", equil%plasma%vz, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/denn", denn3d, dims, error)
     call h5ltread_dataset_int_f(gid, "/plasma/mask", p_mask, dims,error)
+!!! End
 
     impc = inputs%impurity_charge
     where(equil%plasma%zeff.lt.1.0)
@@ -2649,6 +2656,10 @@ subroutine read_equilibrium
         if(sum(rates_avg).le.0.0) cycle loop_over_cells
         equil%plasma(ir,iz,iphi)%denn = denn3d(ir,iz,iphi)*(rates_avg)/sum(rates_avg)
     enddo loop_over_cells
+!!! Below this is where I should reshape all of the parameters to 3-D if nphi =
+!!! 1
+
+!!! End
 
     !!Close PLASMA group
     call h5gclose_f(gid, error)

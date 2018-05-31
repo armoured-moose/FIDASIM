@@ -802,6 +802,7 @@ subroutine deriv_2d(x,y,z,zxp,zyp)
     do i = 1,n
         call deriv_1d(y,z(i,:),zyp(i,:))
     enddo
+!!!        call deriv_2d(z,phi,f(i,:,:),fzp(i,:,:),fphip(i,:,:))
 
 end subroutine deriv_2d
 
@@ -825,21 +826,34 @@ subroutine deriv_3d(r,phi,z,f,frp,fphip,fzp)
 
     integer :: i,n
         !! temporary values for loops
+!!! In here, need to check if stuff related to nphi = 1, if so call deriv 2d
+!!! with new variables,fields%dbr_dphi, fields%dbt_dphi, fields%dbz_dphi = 0 
+!!! i.e., set fphip = 0 if size(phi) = 1, and call the 2d thing with remaining
+!!!     variables
+!!! else call stuff below
+    if (size(phi) .gt. 1) then
 
-    n = size(phi)
-    do i = 1,n
-        call deriv_2d(r,z,f(:,:,i),frp(:,:,i),fzp(:,:,i))
-    enddo
+        n = size(phi)
+        do i = 1,n
+            call deriv_2d(r,z,f(:,:,i),frp(:,:,i),fzp(:,:,i))
+        enddo
 
-    n = size(z)
-    do i = 1,n
-        call deriv_2d(r,phi,f(:,i,:),frp(:,i,:),fphip(:,i,:))
-    enddo
+        n = size(z)
+        do i = 1,n
+            call deriv_2d(r,phi,f(:,i,:),frp(:,i,:),fphip(:,i,:))
+        enddo
 
-    n = size(r)
-    do i = 1,n
-        call deriv_2d(z,phi,f(i,:,:),fzp(i,:,:),fphip(i,:,:))
-    enddo
+        n = size(r)
+        do i = 1,n
+            call deriv_2d(z,phi,f(i,:,:),fzp(i,:,:),fphip(i,:,:))
+        enddo
+    else
+        fphip = 0.0d0
+!!! subroutine deriv_3d(r,phi,z,f,frp,fphip,fzp)
+!!!        call deriv_2d(r,z,f,frp,fzp)
+        call deriv_2d(r,z,f(:,:,1),frp(:,:,1),fzp(:,:,1))
+
+    endif
 
 end subroutine deriv_3d
 

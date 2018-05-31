@@ -2575,7 +2575,8 @@ subroutine read_equilibrium
 
     inter_grid%dr = abs(inter_grid%r(2)-inter_grid%r(1))
 !!! Probably need to insert if statement for dphi
-    inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
+!!!    inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
+    inter_grid%dphi = 0.0d0 
 !!! End
     inter_grid%dz = abs(inter_grid%z(2)-inter_grid%z(1))
 !!! Put an if statement here for dphi as well
@@ -2740,10 +2741,10 @@ subroutine read_f(fid, error)
 !!! if fbm%nphi doesn't exit, the code needs to run in 2-D 
 !!!    allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
 !!!    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
-    allocate(fbm%denf(fbm%nr, fbm%nz))
-    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz))
+    allocate(fbm%denf(fbm%nr, fbm%nz,1))
+    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz,1))
 
-    dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi]
+    dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, 1]
     call h5ltread_dataset_double_f(fid, "/energy", fbm%energy, dims(1:1), error)
     call h5ltread_dataset_double_f(fid, "/pitch", fbm%pitch, dims(2:2), error)
     call h5ltread_dataset_double_f(fid, "/r", fbm%r, dims(3:3), error)
@@ -5900,24 +5901,56 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
     real(Float64), intent(in)               :: zout
         !+ Z value to interpolate
     type(InterpolCoeffs3D), intent(out)     :: c
-        !+ Interpolation Coefficients
+        !+ Cylindrical Interpolation Coefficients
     integer, intent(out), optional          :: err
         !+ Error code
 
+    type(InterpolCoeffs2D) :: b
     real(Float64) :: rmin, phimin, zmin, dr, dphi, dz
     integer :: sr, sphi, sz, err_status
+    
     err_status = 1
-    sr = size(r)
-    sphi = size(phi)
-    sz = size(z)
-    rmin = r(1)
-    phimin = phi(1)
-    zmin = z(1)
-    dr = abs(r(2)-r(1))
-    dphi = abs(phi(2)-phi(1))
-    dz = abs(z(2)-z(1))
 
-    call cyl_interpol3D_coeff(rmin, dr, sr, phimin, dphi, sphi, zmin, dz, sz, rout, phiout, zout, c, err_status)
+!!!    call interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
+!!! subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
+
+    if (size(phi) .eq. 1) then
+!!! subroutine interpol2D_coeff_arr(x,y,xout,yout,c,err)
+        sr = size(r)
+        sz = size(z)
+        rmin = r(1)
+        zmin = z(1)
+        dr = abs(r(2)-r(1))
+        dz = abs(z(2)-z(1))
+
+        call interpol2D_coeff(rmin, dr, sr, zmin, dz, sz, rout, zout, b, err_status)
+        c%b111 = b%b11 
+        c%b112 = b%b12
+        c%b212 = b%b22
+        c%b211 = b%b21
+        c%b221 = 0
+        c%b222 = 0
+        c%b122 = 0
+        c%b121 = 0
+        c%i = b%i
+!!! This may not work, but I'm just going to roll with it.
+!!!        c%j = 1
+!!!       c%k = b%j
+        c%k = 1
+        c%j = b%j
+    else
+        sr = size(r)
+        sphi = size(phi)
+        sz = size(z)
+        rmin = r(1)
+        phimin = phi(1)
+        zmin = z(1)
+        dr = abs(r(2)-r(1))
+        dphi = abs(phi(2)-phi(1))
+        dz = abs(z(2)-z(1))
+
+        call cyl_interpol3D_coeff(rmin, dr, sr, phimin, dphi, sphi, zmin, dz, sz, rout, phiout, zout, c, err_status)
+    endif
 
     if(present(err)) err = err_status
 
@@ -6068,7 +6101,7 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
         !+ Precomputed Linear Interpolation Coefficients
 
     type(InterpolCoeffs3D) :: b
-    integer :: i, j, k, err_status
+    integer :: i, j, k, k2, err_status
 
     err_status = 1
     if(present(coeffs)) then
@@ -6082,10 +6115,13 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
         i = b%i
         j = b%j
         k = b%k
-        dout = b%b111*d(i,j,k) + b%b112*d(i,j,k+1) + &
-            b%b121*d(i,j+1,k) + b%b122*d(i,j+1,k+1) + &
-            b%b211*d(i+1,j,k) + b%b212*d(i+1,j,k+1) + &
-            b%b221*d(i+1,j+1,k) + b%b222*d(i+1,j+1,k+1)
+        k2 = min(k+1,inter_grid%nphi)
+
+!!! Yet again, more confusin
+        dout = b%b111*d(i,j,k) + b%b112*d(i,j+1,k) + &
+            b%b121*d(i,j,k2) + b%b122*d(i,j+1,k2) + &
+            b%b211*d(i+1,j,k) + b%b212*d(i+1,j+1,k) + &
+            b%b221*d(i+1,j,k2) + b%b222*d(i+1,j+1,k2)
     else
         dout = 0.d0
     endif
@@ -6119,7 +6155,7 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
         !+ Precomputed Linear Interpolation Coefficients
 
     type(InterpolCoeffs3D) :: b
-    integer :: i, j, k, err_status
+    integer :: i, j, k, k2, err_status
 
     err_status = 1
     if(present(coeffs)) then
@@ -6133,10 +6169,12 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
         i = b%i
         j = b%j
         k = b%k
-        fout = b%b111*f(:,:,i,j,k) + b%b112*f(:,:,i,j,k+1) + &
-            b%b121*f(:,:,i,j+1,k) + b%b122*f(:,:,i,j+1,k+1) + &
-            b%b211*f(:,:,i+1,j,k) + b%b212*f(:,:,i+1,j,k+1) + &
-            b%b221*f(:,:,i+1,j+1,k) + b%b222*f(:,:,i+1,j+1,k+1)
+        k2 = min(k+1,inter_grid%nphi)
+!!! More confusion with coeffs
+        fout = b%b111*f(:,:,i,j,k) + b%b112*f(:,:,i,j+1,k) + &
+            b%b121*f(:,:,i,j,k2) + b%b122*f(:,:,i,j+1,k2) + &
+            b%b211*f(:,:,i+1,j,k) + b%b212*f(:,:,i+1,j+1,k) + &
+            b%b221*f(:,:,i+1,j,k2) + b%b222*f(:,:,i+1,j+1,k2)
     else
         fout = 0.0
     endif
@@ -6166,7 +6204,7 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
     type(InterpolCoeffs3D) :: b
     real(Float64) :: R, phi, W, mask
     logical :: mc
-    integer :: i, j, k, err
+    integer :: i, j, k, k2, err
 
     err = 1
     mc = .False.
@@ -6190,10 +6228,17 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         i = b%i
         j = b%j
         k = b%k
-        mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k+1) + &
-            b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k+1) + &
-            b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k+1) + &
-            b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k+1)
+        k2 = min(k+1,inter_grid%nphi)
+!!!        mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k+1) + &
+ !!!           b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k+1) + &
+ !!!           b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k+1) + &
+ !!!           b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k+1)
+!!! What I wrote below will probably not make sense to any future developer, but
+!!! I will need to make this easier to read but I will roll with it for now
+        mask = b%b111*equil%mask(i,j,k) + b%b121*equil%mask(i,j,k2) + &
+            b%b112*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k2) + &
+            b%b211*equil%mask(i+1,j,k) + b%b221*equil%mask(i+1,j,k2) + &
+            b%b212*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k2)
 
         if((mask.ge.0.5).and.(err.eq.0)) then
             inp = .True.
@@ -6218,7 +6263,7 @@ subroutine get_plasma(plasma, pos, ind)
     type(InterpolCoeffs3D) :: coeffs
     real(Float64), dimension(3) :: xyz, uvw, vrot_uvw
     real(Float64) :: phi, s, c
-    integer :: i, j, k
+    integer :: i, j, k, k2
 
     plasma%in_plasma = .False.
 
@@ -6231,11 +6276,14 @@ subroutine get_plasma(plasma, pos, ind)
         i = coeffs%i
         j = coeffs%j
         k = coeffs%k
+        k2 = min(k+1,inter_grid%nphi)
 
-        plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j,k+1) + &
-            coeffs%b121*equil%plasma(i,j+1,k) + coeffs%b122*equil%plasma(i,j+1,k+1) + &
-            coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b212*equil%plasma(i+1,j,k+1) + &
-            coeffs%b221*equil%plasma(i+1,j+1,k) + coeffs%b222*equil%plasma(i+1,j+1,k+1)
+!!! Again, need to change the structure to make more sense for a future
+!!! developer
+        plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j+1,k) + &
+            coeffs%b121*equil%plasma(i,j,k2) + coeffs%b122*equil%plasma(i,j+1,k2) + &
+            coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b212*equil%plasma(i+1,j+1,k) + &
+            coeffs%b221*equil%plasma(i+1,j,k2) + coeffs%b222*equil%plasma(i+1,j+1,k2)
 
         s = sin(phi) ; c = cos(phi)
         vrot_uvw(1) = plasma%vr*c - plasma%vt*s
@@ -6297,7 +6345,7 @@ subroutine get_fields(fields, pos, ind, machine_coords)
     real(Float64), dimension(3) :: xyz_bfield, xyz_efield
     real(Float64) :: phi, s, c
     type(InterpolCoeffs3D) :: coeffs
-    integer :: i, j, k
+    integer :: i, j, k, k2
 
     fields%in_plasma = .False.
 
@@ -6313,11 +6361,13 @@ subroutine get_fields(fields, pos, ind, machine_coords)
         i = coeffs%i
         j = coeffs%j
         k = coeffs%k
+        k2 = min(k+1,inter_grid%nphi)
 
-        fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b112*equil%fields(i,j,k+1) + &
-            coeffs%b121*equil%fields(i,j+1,k) + coeffs%b122*equil%fields(i,j+1,k+1) + &
-            coeffs%b211*equil%fields(i+1,j,k) + coeffs%b212*equil%fields(i+1,j,k+1) + &
-            coeffs%b221*equil%fields(i+1,j+1,k) + coeffs%b222*equil%fields(i+1,j+1,k+1)
+!!! Again, below would confuse future developer. Need to fix at some point
+        fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b112*equil%fields(i,j+1,k) + &
+            coeffs%b121*equil%fields(i,j,k2) + coeffs%b122*equil%fields(i,j+1,k2) + &
+            coeffs%b211*equil%fields(i+1,j,k) + coeffs%b212*equil%fields(i+1,j+1,k) + &
+            coeffs%b221*equil%fields(i+1,j,k2) + coeffs%b222*equil%fields(i+1,j+1,k2)
 
         phi = atan2(uvw(2),uvw(1))
         s = sin(phi) ; c = cos(phi)
@@ -7522,6 +7572,7 @@ subroutine gyro_step(vi, fields, r_gyro)
         term1 = vpar*one_over_omega*dot_product(b_rtz,cuvrxb)
         grad_B(1) = (fields%br*fields%dbr_dr + fields%bt * fields%dbt_dr + fields%bz*fields%dbz_dr)/&
                     fields%b_abs
+!!! I will need to set these equal to 0 in my check
         grad_B(2) = (fields%br*fields%dbr_dphi + fields%bt * fields%dbt_dphi + fields%bz*fields%dbz_dphi)/&
                     fields%b_abs
         grad_B(3) = (fields%br*fields%dbr_dz + fields%bt * fields%dbt_dz + fields%bz*fields%dbz_dz)/&

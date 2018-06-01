@@ -234,7 +234,6 @@ type InterpolationGrid
         !+ Grid element area [\(cm^2\)]
     real(Float64)  :: dv
         !+ Grid element volume [\(cm^2\)]
-        !!! Without r factor
     integer(Int32) :: dims(3)
         !+ Dimension of the interpolation grid
     real(Float64), dimension(:),   allocatable :: r
@@ -2574,16 +2573,19 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/plasma/z2d", inter_grid%z2d, dims, error)
 
     inter_grid%dr = abs(inter_grid%r(2)-inter_grid%r(1))
-!!! Probably need to insert if statement for dphi
-!!!    inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
-    inter_grid%dphi = 0.0d0 
-!!! End
     inter_grid%dz = abs(inter_grid%z(2)-inter_grid%z(1))
-!!! Put an if statement here for dphi as well
     inter_grid%da = inter_grid%dr*inter_grid%dz
-    !!! Omitting the r factor
-    inter_grid%dv = inter_grid%dr*inter_grid%dphi*inter_grid%dz
+    if (inter_grid%nphi .eq. 1) then
+        inter_grid%dphi = 0.0d0
+!!! Should I set inter_grid%dv = inter_grid%dphi, or keep as is
+        inter_grid%dv = 0.0d0
 !!! End
+    else
+        inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
+!!! Omitting the r factor in dv
+        inter_grid%dv = inter_grid%dr*inter_grid%dphi*inter_grid%dz
+!!! End
+    endif
 
     if(inputs%verbose.ge.1) then
         write(*,'(a)') '---- Interpolation grid settings ----'
@@ -2598,7 +2600,6 @@ subroutine read_equilibrium
     !!Read in plasma parameters
     allocate(equil%plasma(inter_grid%nr,inter_grid%nz,inter_grid%nphi))
 
-!!! This is where the plasma parameters are read in
     call h5ltread_dataset_double_f(gid, "/plasma/dene", equil%plasma%dene, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/te", equil%plasma%te, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/ti", equil%plasma%ti, dims, error)
@@ -2608,7 +2609,6 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/plasma/vz", equil%plasma%vz, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/denn", denn3d, dims, error)
     call h5ltread_dataset_int_f(gid, "/plasma/mask", p_mask, dims,error)
-!!! End
 
     impc = inputs%impurity_charge
     where(equil%plasma%zeff.lt.1.0)
@@ -2657,10 +2657,6 @@ subroutine read_equilibrium
         if(sum(rates_avg).le.0.0) cycle loop_over_cells
         equil%plasma(ir,iz,iphi)%denn = denn3d(ir,iz,iphi)*(rates_avg)/sum(rates_avg)
     enddo loop_over_cells
-!!! Below this is where I should reshape all of the parameters to 3-D if nphi =
-!!! 1
-
-!!! End
 
     !!Close PLASMA group
     call h5gclose_f(gid, error)
@@ -2679,7 +2675,6 @@ subroutine read_equilibrium
     call h5ltread_dataset_double_f(gid, "/fields/ez", equil%fields%ez, dims, error)
     call h5ltread_dataset_int_f(gid, "/fields/mask", f_mask, dims,error)
 
-!!! I think this is working, but I should double check that the storage is fine
     !!Calculate B field derivatives
     call deriv(inter_grid%r, inter_grid%phi, inter_grid%z, equil%fields%br, &
         equil%fields%dbr_dr, equil%fields%dbr_dphi, equil%fields%dbr_dz)
@@ -2729,48 +2724,51 @@ subroutine read_f(fid, error)
     call h5ltread_dataset_int_scalar_f(fid,"/nz", fbm%nz, error)
     call h5ltread_dataset_int_scalar_f(fid,"/nphi", fbm%nphi, error)
 
-!!!    if(((fbm%nr.ne.inter_grid%nr).or.(fbm%nz.ne.inter_grid%nz)).or.(fbm%nphi.ne.inter_grid%nphi)) then
-    if((fbm%nr.ne.inter_grid%nr).or.(fbm%nz.ne.inter_grid%nz)) then
+    if(((fbm%nr.ne.inter_grid%nr).or.(fbm%nz.ne.inter_grid%nz)).or.(fbm%nphi.ne.inter_grid%nphi)) then
         if(inputs%verbose.ge.0) then
             write(*,'(a)') "READ_F: Distribution file has incompatable grid dimensions"
         endif
         error stop
     endif
 
-    allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz), fbm%phi(fbm%nphi))
-!!! if fbm%nphi doesn't exit, the code needs to run in 2-D 
-!!!    allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
-!!!    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
-    allocate(fbm%denf(fbm%nr, fbm%nz,1))
-    allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz,1))
+!!! See if the fbm%nphi causes errors when running in 3D
+    if (inter_grid%nphi .eq. 1) then
+        allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz), fbm%phi(1))
+        allocate(fbm%denf(fbm%nr, fbm%nz,1))
+        allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz,1))
+    else
+        allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz), fbm%phi(fbm%nphi))
+        allocate(fbm%denf(fbm%nr, fbm%nz, fbm%nphi))
+        allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
+    endif
 
-    dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, 1]
+    if (inter_grid%nphi .eq. 1) then
+        dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, 1]
+        call h5ltread_dataset_double_f(fid, "/denf",fbm%denf, dims(3:4), error)
+        call h5ltread_dataset_double_f(fid, "/f", fbm%f, dims(1:4), error)
+    else
+        dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi]
+        call h5ltread_dataset_double_f(fid, "/denf",fbm%denf, dims(3:5), error)
+        call h5ltread_dataset_double_f(fid, "/f", fbm%f, dims(1:5), error)
+    endif
     call h5ltread_dataset_double_f(fid, "/energy", fbm%energy, dims(1:1), error)
     call h5ltread_dataset_double_f(fid, "/pitch", fbm%pitch, dims(2:2), error)
     call h5ltread_dataset_double_f(fid, "/r", fbm%r, dims(3:3), error)
     call h5ltread_dataset_double_f(fid, "/z", fbm%z, dims(4:4), error)
     call h5ltread_dataset_double_f(fid, "/phi", fbm%phi, dims(5:5), error)
-!!! May need to change dims below
-    call h5ltread_dataset_double_f(fid, "/denf",fbm%denf, dims(3:4), error)
-    call h5ltread_dataset_double_f(fid, "/f", fbm%f, dims(1:4), error)
-!!! End
+
     equil%plasma%denf = fbm%denf
 
     fbm%dE = abs(fbm%energy(2) - fbm%energy(1))
     fbm%dp = abs(fbm%pitch(2) - fbm%pitch(1))
     fbm%dr = abs(fbm%r(2) - fbm%r(1))
     fbm%dz = abs(fbm%z(2) - fbm%z(1))
-!!! This might need to be intergrid instead
- !!!   if(fbm%nphi.eq.1) then
-!!! Need to be careful below, I think dphi is used for normalizing later on. I
-!!! may need to set this to 2*pi
- !!!       fbm%dphi = 0.0d0
-!!!        fbm%denf = spread(fbm%denf, 3, 1)
-!!!        fbm%f = spread(fbm%f, 5, 1)
+    if (inter_grid%nphi .eq. 1) then
+        fbm%dphi = 0.0d0
+    else
+        fbm%dphi = abs(fbm%phi(2)-fbm%phi(1))
+    endif
 !!! End
- !!!   else
- !!!       fbm%dphi = abs(fbm%phi(2) - fbm%phi(1))
- !!!   endif
 
     dummy = minval(fbm%energy)
     fbm%emin = dummy(1)
@@ -2783,16 +2781,17 @@ subroutine read_f(fid, error)
     fbm%pmax = dummy(1)
     fbm%p_range = fbm%pmax - fbm%pmin
 
-!!! I missed the 2*pi normalization below. Need to consider this below.
- !!!   if(fbm%nphi.eq.1) then
- !!!       do ir=1,fbm%nr
- !!!           fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
- !!!       enddo
- !!!   else
- !!!       do ir=1,fbm%nr
- !!!           fbm%n_tot = fbm%n_tot + fbm%dr*fbm%dz*fbm%dphi*sum(fbm%denf(ir,:,:))*fbm%r(ir)
- !!!       enddo
- !!!   endif
+    if (inter_grid%nphi .eq. 1) then
+        do ir=1,fbm%nr
+            fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
+        enddo
+    else
+!!! Low priority, but I should fix once all of my 3D stuff is working
+!!!        do ir=1,fbm%nr
+!!!            fbm%n_tot = fbm%n_tot + fbm%dr*fbm%dz*fbm%dphi*sum(fbm%denf(ir,:,:))*fbm%r(ir)
+!!!        enddo
+!!! End
+    endif
 
     if(inputs%verbose.ge.1) then
         write(*,'(T2,"Distribution type: ",a)') "Fast-ion Density Function F(energy,pitch,R,Z,Phi)"
@@ -5867,6 +5866,7 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
         z2 = z1 + dz
         dV = ((r2**2 - r1**2) * (phi2 - phi1) * (z2 - z1)) / 2
 
+!!! Need to fix this
         c%b111 = ((r2**2 - rp**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
         c%b112 = ((r2**2 - rp**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
         c%b212 = ((rp**2 - r1**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
@@ -5878,6 +5878,7 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
         c%i = i
         c%j = j
         c%k = k
+!!! End
         err_status = 0
     endif
 
@@ -5911,11 +5912,8 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
     
     err_status = 1
 
-!!!    call interpol_coeff(inter_grid%r, inter_grid%phi, inter_grid%z, R, phi, W, b, err)
-!!! subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
 
-    if (size(phi) .eq. 1) then
-!!! subroutine interpol2D_coeff_arr(x,y,xout,yout,c,err)
+    if (inter_grid%nphi .eq. 1) then
         sr = size(r)
         sz = size(z)
         rmin = r(1)
@@ -5924,6 +5922,7 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
         dz = abs(z(2)-z(1))
 
         call interpol2D_coeff(rmin, dr, sr, zmin, dz, sz, rout, zout, b, err_status)
+!!! This will probably need to get fixed once I sort out the coefficient issue
         c%b111 = b%b11 
         c%b112 = b%b12
         c%b212 = b%b22
@@ -5933,11 +5932,9 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
         c%b122 = 0
         c%b121 = 0
         c%i = b%i
-!!! This may not work, but I'm just going to roll with it.
-!!!        c%j = 1
-!!!       c%k = b%j
         c%k = 1
         c%j = b%j
+!!! End
     else
         sr = size(r)
         sphi = size(phi)
@@ -6117,11 +6114,12 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
         k = b%k
         k2 = min(k+1,inter_grid%nphi)
 
-!!! Yet again, more confusin
+!!! This will probably need to get fixed once I sort out the coefficient issue
         dout = b%b111*d(i,j,k) + b%b112*d(i,j+1,k) + &
             b%b121*d(i,j,k2) + b%b122*d(i,j+1,k2) + &
             b%b211*d(i+1,j,k) + b%b212*d(i+1,j+1,k) + &
             b%b221*d(i+1,j,k2) + b%b222*d(i+1,j+1,k2)
+!!! End
     else
         dout = 0.d0
     endif
@@ -6170,11 +6168,12 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
         j = b%j
         k = b%k
         k2 = min(k+1,inter_grid%nphi)
-!!! More confusion with coeffs
+!!! This will probably need to get fixed once I sort out the coefficient issue
         fout = b%b111*f(:,:,i,j,k) + b%b112*f(:,:,i,j+1,k) + &
             b%b121*f(:,:,i,j,k2) + b%b122*f(:,:,i,j+1,k2) + &
             b%b211*f(:,:,i+1,j,k) + b%b212*f(:,:,i+1,j+1,k) + &
             b%b221*f(:,:,i+1,j,k2) + b%b222*f(:,:,i+1,j+1,k2)
+!!! End
     else
         fout = 0.0
     endif
@@ -6229,17 +6228,12 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         j = b%j
         k = b%k
         k2 = min(k+1,inter_grid%nphi)
-!!!        mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k+1) + &
- !!!           b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k+1) + &
- !!!           b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k+1) + &
- !!!           b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k+1)
-!!! What I wrote below will probably not make sense to any future developer, but
-!!! I will need to make this easier to read but I will roll with it for now
+!!! This will probably need to get fixed once I sort out the coefficient issue
         mask = b%b111*equil%mask(i,j,k) + b%b121*equil%mask(i,j,k2) + &
             b%b112*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k2) + &
             b%b211*equil%mask(i+1,j,k) + b%b221*equil%mask(i+1,j,k2) + &
             b%b212*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k2)
-
+!!! End
         if((mask.ge.0.5).and.(err.eq.0)) then
             inp = .True.
         endif
@@ -6278,12 +6272,12 @@ subroutine get_plasma(plasma, pos, ind)
         k = coeffs%k
         k2 = min(k+1,inter_grid%nphi)
 
-!!! Again, need to change the structure to make more sense for a future
-!!! developer
+!!! This will probably need to get fixed once I sort out the coefficient issue
         plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j+1,k) + &
             coeffs%b121*equil%plasma(i,j,k2) + coeffs%b122*equil%plasma(i,j+1,k2) + &
             coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b212*equil%plasma(i+1,j+1,k) + &
             coeffs%b221*equil%plasma(i+1,j,k2) + coeffs%b222*equil%plasma(i+1,j+1,k2)
+!!! End
 
         s = sin(phi) ; c = cos(phi)
         vrot_uvw(1) = plasma%vr*c - plasma%vt*s
@@ -6363,11 +6357,12 @@ subroutine get_fields(fields, pos, ind, machine_coords)
         k = coeffs%k
         k2 = min(k+1,inter_grid%nphi)
 
-!!! Again, below would confuse future developer. Need to fix at some point
+!!! This will probably need to get fixed once I sort out the coefficient issue
         fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b112*equil%fields(i,j+1,k) + &
             coeffs%b121*equil%fields(i,j,k2) + coeffs%b122*equil%fields(i,j+1,k2) + &
             coeffs%b211*equil%fields(i+1,j,k) + coeffs%b212*equil%fields(i+1,j+1,k) + &
             coeffs%b221*equil%fields(i+1,j,k2) + coeffs%b222*equil%fields(i+1,j+1,k2)
+!!! End
 
         phi = atan2(uvw(2),uvw(1))
         s = sin(phi) ; c = cos(phi)
@@ -7162,7 +7157,9 @@ subroutine attenuate(ri, rf, vi, states, dstep_in)
     if(present(dstep_in)) then
         dstep=dstep_in
     else
+!!! I wonder if I will need an inter_grid%dv here 
         dstep = sqrt(inter_grid%da) !cm
+!!! End
     endif
 
     max_dis = norm2(rf-ri)
@@ -7572,14 +7569,18 @@ subroutine gyro_step(vi, fields, r_gyro)
         term1 = vpar*one_over_omega*dot_product(b_rtz,cuvrxb)
         grad_B(1) = (fields%br*fields%dbr_dr + fields%bt * fields%dbt_dr + fields%bz*fields%dbz_dr)/&
                     fields%b_abs
-!!! I will need to set these equal to 0 in my check
+!!! This looks like it worked, but I should double check it somehow at some point
+!!! Used to be = 0
         grad_B(2) = (fields%br*fields%dbr_dphi + fields%bt * fields%dbt_dphi + fields%bz*fields%dbz_dphi)/&
                     fields%b_abs
+!!! End
         grad_B(3) = (fields%br*fields%dbr_dz + fields%bt * fields%dbt_dz + fields%bz*fields%dbz_dz)/&
                     fields%b_abs
         rg_rtz(1) = rg_uvw(1)*cos(phi) + rg_uvw(2)*sin(phi)
-!!! This seems like a matrix transformation, but I should double check this
+!!! This looks like it worked, but I should double check it somehow at some point
+!!! This seems like a matrix transformation
         rg_rtz(2) = -rg_uvw(1)*sin(phi) + rg_uvw(2)*cos(phi)
+!!! End
         rg_rtz(3) = rg_uvw(3)
         term2 = -1.0 / (2.0 * fields%b_abs)*dot_product(rg_rtz,grad_B)
         r_gyro = r_gyro * (1.0 - term1 - term2)
@@ -9506,6 +9507,7 @@ subroutine neutron_f
 !!! Might need to multiply by dphi below. I should also check the output of
 !!! this whole neutron stuff because it is what I don't understand most 
                 factor = 2*pi*fbm%r(ir)*fbm%dE*fbm%dp*fbm%dr*fbm%dz/nphi
+!!! End
                 !! Loop over energy/pitch/phi
                 pitch_loop: do ip = 1, fbm%npitch
                     pitch = fbm%pitch(ip)

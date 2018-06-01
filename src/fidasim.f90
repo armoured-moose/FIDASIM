@@ -5854,8 +5854,8 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
     phip = max(phi,phimin)
     zp = max(zout,zmin)
     i = floor((rp-rmin)/dr)+1
-    j = floor((phip-phimin)/dphi)+1
-    k = floor((zp-zmin)/dz)+1
+    j = floor((zp-zmin)/dz)+1
+    k = floor((phip-phimin)/dphi)+1
 
     if ((((i.gt.0).and.(i.le.(nr-1))).and.((j.gt.0).and.(j.le.(nphi-1)))).and.((k.gt.0).and.(k.le.(nz-1)))) then
         r1 = rmin + (i-1)*dr
@@ -5868,13 +5868,13 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
 
 !!! Need to fix this
         c%b111 = ((r2**2 - rp**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
-        c%b112 = ((r2**2 - rp**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
-        c%b212 = ((rp**2 - r1**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
+        c%b121 = ((r2**2 - rp**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
+        c%b221 = ((rp**2 - r1**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
         c%b211 = ((rp**2 - r1**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
-        c%b221 = ((rp**2 - r1**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
+        c%b212 = ((rp**2 - r1**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
         c%b222 = ((rp**2 - r1**2) * (phip - phi1) * (zp - z1)) / (dV * 2)
         c%b122 = ((r2**2 - rp**2) * (phip - phi1) * (zp - z1)) / (dV * 2)
-        c%b121 = ((r2**2 - rp**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
+        c%b112 = ((r2**2 - rp**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
         c%i = i
         c%j = j
         c%k = k
@@ -5924,16 +5924,16 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
         call interpol2D_coeff(rmin, dr, sr, zmin, dz, sz, rout, zout, b, err_status)
 !!! This will probably need to get fixed once I sort out the coefficient issue
         c%b111 = b%b11 
-        c%b112 = b%b12
-        c%b212 = b%b22
+        c%b121 = b%b12
+        c%b221 = b%b22
         c%b211 = b%b21
-        c%b221 = 0
+        c%b212 = 0
         c%b222 = 0
         c%b122 = 0
-        c%b121 = 0
+        c%b112 = 0
         c%i = b%i
-        c%k = 1
         c%j = b%j
+        c%k = 1
 !!! End
     else
         sr = size(r)
@@ -6115,10 +6115,10 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
         k2 = min(k+1,inter_grid%nphi)
 
 !!! This will probably need to get fixed once I sort out the coefficient issue
-        dout = b%b111*d(i,j,k) + b%b112*d(i,j+1,k) + &
-            b%b121*d(i,j,k2) + b%b122*d(i,j+1,k2) + &
-            b%b211*d(i+1,j,k) + b%b212*d(i+1,j+1,k) + &
-            b%b221*d(i+1,j,k2) + b%b222*d(i+1,j+1,k2)
+        dout = b%b111*d(i,j,k) + b%b121*d(i,j+1,k) + &
+            b%b112*d(i,j,k2) + b%b122*d(i,j+1,k2) + &
+            b%b211*d(i+1,j,k) + b%b221*d(i+1,j+1,k) + &
+            b%b212*d(i+1,j,k2) + b%b222*d(i+1,j+1,k2)
 !!! End
     else
         dout = 0.d0
@@ -6169,10 +6169,10 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
         k = b%k
         k2 = min(k+1,inter_grid%nphi)
 !!! This will probably need to get fixed once I sort out the coefficient issue
-        fout = b%b111*f(:,:,i,j,k) + b%b112*f(:,:,i,j+1,k) + &
-            b%b121*f(:,:,i,j,k2) + b%b122*f(:,:,i,j+1,k2) + &
-            b%b211*f(:,:,i+1,j,k) + b%b212*f(:,:,i+1,j+1,k) + &
-            b%b221*f(:,:,i+1,j,k2) + b%b222*f(:,:,i+1,j+1,k2)
+        fout = b%b111*f(:,:,i,j,k) + b%b121*f(:,:,i,j+1,k) + &
+            b%b112*f(:,:,i,j,k2) + b%b122*f(:,:,i,j+1,k2) + &
+            b%b211*f(:,:,i+1,j,k) + b%b221*f(:,:,i+1,j+1,k) + &
+            b%b212*f(:,:,i+1,j,k2) + b%b222*f(:,:,i+1,j+1,k2)
 !!! End
     else
         fout = 0.0
@@ -6229,10 +6229,10 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         k = b%k
         k2 = min(k+1,inter_grid%nphi)
 !!! This will probably need to get fixed once I sort out the coefficient issue
-        mask = b%b111*equil%mask(i,j,k) + b%b121*equil%mask(i,j,k2) + &
-            b%b112*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k2) + &
-            b%b211*equil%mask(i+1,j,k) + b%b221*equil%mask(i+1,j,k2) + &
-            b%b212*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k2)
+        mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k2) + &
+            b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k2) + &
+            b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k2) + &
+            b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k2)
 !!! End
         if((mask.ge.0.5).and.(err.eq.0)) then
             inp = .True.
@@ -6273,10 +6273,10 @@ subroutine get_plasma(plasma, pos, ind)
         k2 = min(k+1,inter_grid%nphi)
 
 !!! This will probably need to get fixed once I sort out the coefficient issue
-        plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b112*equil%plasma(i,j+1,k) + &
-            coeffs%b121*equil%plasma(i,j,k2) + coeffs%b122*equil%plasma(i,j+1,k2) + &
-            coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b212*equil%plasma(i+1,j+1,k) + &
-            coeffs%b221*equil%plasma(i+1,j,k2) + coeffs%b222*equil%plasma(i+1,j+1,k2)
+        plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b121*equil%plasma(i,j+1,k) + &
+            coeffs%b112*equil%plasma(i,j,k2) + coeffs%b122*equil%plasma(i,j+1,k2) + &
+            coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b221*equil%plasma(i+1,j+1,k) + &
+            coeffs%b212*equil%plasma(i+1,j,k2) + coeffs%b222*equil%plasma(i+1,j+1,k2)
 !!! End
 
         s = sin(phi) ; c = cos(phi)
@@ -6358,10 +6358,10 @@ subroutine get_fields(fields, pos, ind, machine_coords)
         k2 = min(k+1,inter_grid%nphi)
 
 !!! This will probably need to get fixed once I sort out the coefficient issue
-        fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b112*equil%fields(i,j+1,k) + &
-            coeffs%b121*equil%fields(i,j,k2) + coeffs%b122*equil%fields(i,j+1,k2) + &
-            coeffs%b211*equil%fields(i+1,j,k) + coeffs%b212*equil%fields(i+1,j+1,k) + &
-            coeffs%b221*equil%fields(i+1,j,k2) + coeffs%b222*equil%fields(i+1,j+1,k2)
+        fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b121*equil%fields(i,j+1,k) + &
+            coeffs%b112*equil%fields(i,j,k2) + coeffs%b122*equil%fields(i,j+1,k2) + &
+            coeffs%b211*equil%fields(i+1,j,k) + coeffs%b221*equil%fields(i+1,j+1,k) + &
+            coeffs%b212*equil%fields(i+1,j,k2) + coeffs%b222*equil%fields(i+1,j+1,k2)
 !!! End
 
         phi = atan2(uvw(2),uvw(1))

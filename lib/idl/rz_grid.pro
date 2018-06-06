@@ -20,7 +20,8 @@ FUNCTION rz_grid,rmin,rmax,nr,zmin,zmax,nz,phimin=phimin,phimax=phimax,nphi=nphi
     ;+
     ;+##Example Usage
     ;+```idl
-    ;+IDL> grid = rz_grid(0,200.0,200,-100,100,200)
+;;; May need to double check this comment
+    ;+IDL> grid = rz_grid(0,200.0,200,-100,100,200,phimin=5*!dpi/4,phimax=7*!dpi/4,nphi=200)
     ;+```
 
 ;;; Are the units right on this?
@@ -29,15 +30,10 @@ FUNCTION rz_grid,rmin,rmax,nr,zmin,zmax,nz,phimin=phimin,phimax=phimax,nphi=nphi
     if not keyword_set(nphi) then nphi = 1
 
     dr = (rmax-rmin)/(nr-1)
-;;; Might need to put an if statement here for when there are a lot of dphi values 
-;;; I also feel that dphi = 0 when nphi = 1
-    dphi = (phimax-phimin)/nphi
-;;; End
+    dphi = (phimax-phimin)/(nphi-1)
     dz = (zmax-zmin)/(nz-1)
     r = rmin + dr*dindgen(nr)
-;;; From this, there should only be one phi value, 0
     phi = phimin + dphi*dindgen(nphi)
-;;; End
     z = zmin + dz*dindgen(nz)
 
 ;;; Do I need to change this?

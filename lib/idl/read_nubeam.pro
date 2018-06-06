@@ -140,13 +140,10 @@ FUNCTION read_nubeam,filename,grid,btipsign=btipsign,e_range=e_range,p_range=p_r
     ;; ------map fdens on FIDASIM grid and sort out
     ;; ------points outside the separatrix
     nr=grid.nr
-    nphi=grid.nphi
     nz=grid.nz
     rgrid=grid.r
-    phigrid=grid.phi
     zgrid=grid.z
     dr = abs(rgrid[1]-rgrid[0])
-    dphi = 0.01 + phigrid[0]
     dz = abs(zgrid[1]-zgrid[0])
     
     ;; FBM & DENF
@@ -204,6 +201,16 @@ FUNCTION read_nubeam,filename,grid,btipsign=btipsign,e_range=e_range,p_range=p_r
             fbm_grid[*,*,indices[0,i],indices[1,i]]=0.
         endfor
     endif
+
+    rows = n_elements(denf[0,*])
+    cols = n_elements(denf[*,0])
+    denf=rebin(denf,cols,rows,grid.nphi)
+;;;    data_source=rebin(data_source,cols,rows,grid.nphi)
+    dim4 = n_elements(fbm_grid[0,0,0,*])
+    dim3 = n_elements(fbm_grid[0,0,*,0])
+    dim2 = n_elements(fbm_grid[0,*,0,0])
+    dim1 = n_elements(fbm_grid[*,0,0,0])
+    fbm_grid=rebin(fbm_grid,dim1,dim2,dim3,dim4,grid.nphi)
 
     fbm_struct={type:1,time:time,nenergy:fix(nenergy),energy:energy,npitch:fix(npitch),$
                 pitch:pitch,f:fbm_grid,denf:denf,data_source:file_expand_path(filename)}

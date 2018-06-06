@@ -118,7 +118,7 @@ PRO run_tests,result_dir,test_case=test_case
        ENDCASE
        PRINT, inputs.comment
 
-       grid = rz_grid(100.d0,240.d0, 70, -100.d0,100.d0, 100)
+       grid = rz_grid(100.d0,240.d0, 70, -100.d0,100.d0, 100,phimin=4*!dpi/3,phimax=5*!dpi/3,nphi=5)
        equil = read_geqdsk(test_dir+'g000001.01000',grid,flux=flux,g=g)
        equil = create_struct(equil,"geqdsk",g)
        fbm = read_nubeam(test_dir+'test_fi_2.cdf',grid,$

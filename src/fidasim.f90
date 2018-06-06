@@ -2021,6 +2021,7 @@ subroutine make_beam_grid
                 ri = [beam_grid%xc(i),beam_grid%yc(j), beam_grid%zc(k)]
                 call in_plasma(ri, inp)
                 if(inp) n = n + 1
+                endif
             enddo
         enddo
     enddo
@@ -2731,8 +2732,7 @@ subroutine read_f(fid, error)
         error stop
     endif
 
-!!! See if the fbm%nphi causes errors when running in 3D
-    if (inter_grid%nphi .eq. 1) then
+    if (fbm%nphi .eq. 1) then
         allocate(fbm%energy(fbm%nenergy), fbm%pitch(fbm%npitch), fbm%r(fbm%nr), fbm%z(fbm%nz), fbm%phi(1))
         allocate(fbm%denf(fbm%nr, fbm%nz,1))
         allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz,1))
@@ -2742,7 +2742,7 @@ subroutine read_f(fid, error)
         allocate(fbm%f(fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, fbm%nphi))
     endif
 
-    if (inter_grid%nphi .eq. 1) then
+    if (fbm%nphi .eq. 1) then
         dims = [fbm%nenergy, fbm%npitch, fbm%nr, fbm%nz, 1]
         call h5ltread_dataset_double_f(fid, "/denf",fbm%denf, dims(3:4), error)
         call h5ltread_dataset_double_f(fid, "/f", fbm%f, dims(1:4), error)
@@ -2764,11 +2764,10 @@ subroutine read_f(fid, error)
     fbm%dr = abs(fbm%r(2) - fbm%r(1))
     fbm%dz = abs(fbm%z(2) - fbm%z(1))
     if (inter_grid%nphi .eq. 1) then
-        fbm%dphi = 0.0d0
+        fbm%dphi = 2*pi
     else
         fbm%dphi = abs(fbm%phi(2)-fbm%phi(1))
     endif
-!!! End
 
     dummy = minval(fbm%energy)
     fbm%emin = dummy(1)
@@ -2781,17 +2780,9 @@ subroutine read_f(fid, error)
     fbm%pmax = dummy(1)
     fbm%p_range = fbm%pmax - fbm%pmin
 
-    if (inter_grid%nphi .eq. 1) then
-        do ir=1,fbm%nr
-            fbm%n_tot = fbm%n_tot + 2*pi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
-        enddo
-    else
-!!! Low priority, but I should fix once all of my 3D stuff is working
-!!!        do ir=1,fbm%nr
-!!!            fbm%n_tot = fbm%n_tot + fbm%dr*fbm%dz*fbm%dphi*sum(fbm%denf(ir,:,:))*fbm%r(ir)
-!!!        enddo
-!!! End
-    endif
+    do ir=1,fbm%nr
+        fbm%n_tot = fbm%n_tot + fbm%dphi*fbm%dr*fbm%dz*sum(fbm%denf(ir,:,:))*fbm%r(ir)
+    enddo
 
     if(inputs%verbose.ge.1) then
         write(*,'(T2,"Distribution type: ",a)') "Fast-ion Density Function F(energy,pitch,R,Z,Phi)"
@@ -5835,6 +5826,7 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
     integer, intent(out), optional      :: err
         !+ Error code
 
+    type(InterpolCoeffs2D) :: b
     real(Float64) :: r1, r2, phi1, phi2, z1, z2, rp, phip, zp, dV
     real(Float64) :: phi
     integer :: i, j, k, err_status
@@ -5857,29 +5849,43 @@ subroutine cyl_interpol3D_coeff(rmin,dr,nr,phimin,dphi,nphi,zmin,dz,nz,rout,phio
     j = floor((zp-zmin)/dz)+1
     k = floor((phip-phimin)/dphi)+1
 
-    if ((((i.gt.0).and.(i.le.(nr-1))).and.((j.gt.0).and.(j.le.(nphi-1)))).and.((k.gt.0).and.(k.le.(nz-1)))) then
-        r1 = rmin + (i-1)*dr
-        r2 = r1 + dr
-        phi1 = phimin + (j-1)*dphi
-        phi2 = phi1 + dphi
-        z1 = zmin + (k-1)*dz
-        z2 = z1 + dz
-        dV = ((r2**2 - r1**2) * (phi2 - phi1) * (z2 - z1)) / 2
+    if (nphi .eq. 1) then
+        call interpol2D_coeff(rmin, dr, nr, zmin, dz, nz, rout, zout, b, err_status)
+        c%b111 = b%b11 
+        c%b121 = b%b12
+        c%b221 = b%b22
+        c%b211 = b%b21
+        c%b212 = 0
+        c%b222 = 0
+        c%b122 = 0
+        c%b112 = 0
+        c%i = b%i
+        c%j = b%j
+        c%k = 1
+    else
+        if ((((i.gt.0).and.(i.le.(nr-1))).and.((k.gt.0).and.(k.le.(nphi-1)))).and.((j.gt.0).and.(j.le.(nz-1)))) then
+            r1 = rmin + (i-1)*dr
+            r2 = r1 + dr
+            phi1 = phimin + (k-1)*dphi
+            phi2 = phi1 + dphi
+            z1 = zmin + (j-1)*dz
+            z2 = z1 + dz
+            dV = ((r2**2 - r1**2) * (phi2 - phi1) * (z2 - z1))
 
-!!! Need to fix this
-        c%b111 = ((r2**2 - rp**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
-        c%b121 = ((r2**2 - rp**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
-        c%b221 = ((rp**2 - r1**2) * (phi2 - phip) * (zp - z1)) / (dV * 2)
-        c%b211 = ((rp**2 - r1**2) * (phi2 - phip) * (z2 - zp)) / (dV * 2)
-        c%b212 = ((rp**2 - r1**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
-        c%b222 = ((rp**2 - r1**2) * (phip - phi1) * (zp - z1)) / (dV * 2)
-        c%b122 = ((r2**2 - rp**2) * (phip - phi1) * (zp - z1)) / (dV * 2)
-        c%b112 = ((r2**2 - rp**2) * (phip - phi1) * (z2 - zp)) / (dV * 2)
-        c%i = i
-        c%j = j
-        c%k = k
-!!! End
-        err_status = 0
+            !! Both volume elements have a factor of 1/2 that cancels out
+            c%b111 = ((r2**2 - rp**2) * (phi2 - phip) * (z2 - zp)) / dV
+            c%b121 = ((r2**2 - rp**2) * (phi2 - phip) * (zp - z1)) / dV
+            c%b221 = ((rp**2 - r1**2) * (phi2 - phip) * (zp - z1)) / dV
+            c%b211 = ((rp**2 - r1**2) * (phi2 - phip) * (z2 - zp)) / dV
+            c%b212 = ((rp**2 - r1**2) * (phip - phi1) * (z2 - zp)) / dV
+            c%b222 = ((rp**2 - r1**2) * (phip - phi1) * (zp - z1)) / dV
+            c%b122 = ((r2**2 - rp**2) * (phip - phi1) * (zp - z1)) / dV
+            c%b112 = ((r2**2 - rp**2) * (phip - phi1) * (z2 - zp)) / dV
+            c%i = i
+            c%j = j
+            c%k = k
+            err_status = 0
+        endif
     endif
 
     if(present(err)) err = err_status
@@ -5911,18 +5917,17 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
     integer :: sr, sphi, sz, err_status
     
     err_status = 1
+    sr = size(r)
+    sphi = size(phi)
+    sz = size(z)
 
+    rmin = r(1)
+    zmin = z(1)
+    dr = abs(r(2)-r(1))
+    dz = abs(z(2)-z(1))
 
-    if (inter_grid%nphi .eq. 1) then
-        sr = size(r)
-        sz = size(z)
-        rmin = r(1)
-        zmin = z(1)
-        dr = abs(r(2)-r(1))
-        dz = abs(z(2)-z(1))
-
+    if (sphi .eq. 1) then
         call interpol2D_coeff(rmin, dr, sr, zmin, dz, sz, rout, zout, b, err_status)
-!!! This will probably need to get fixed once I sort out the coefficient issue
         c%b111 = b%b11 
         c%b121 = b%b12
         c%b221 = b%b22
@@ -5934,18 +5939,9 @@ subroutine cyl_interpol3D_coeff_arr(r,phi,z,rout,phiout,zout,c,err)
         c%i = b%i
         c%j = b%j
         c%k = 1
-!!! End
     else
-        sr = size(r)
-        sphi = size(phi)
-        sz = size(z)
-        rmin = r(1)
         phimin = phi(1)
-        zmin = z(1)
-        dr = abs(r(2)-r(1))
         dphi = abs(phi(2)-phi(1))
-        dz = abs(z(2)-z(1))
-
         call cyl_interpol3D_coeff(rmin, dr, sr, phimin, dphi, sphi, zmin, dz, sz, rout, phiout, zout, c, err_status)
     endif
 
@@ -6099,27 +6095,39 @@ subroutine interpol3D_arr(r, phi, z, d, rout, phiout, zout, dout, err, coeffs)
 
     type(InterpolCoeffs3D) :: b
     integer :: i, j, k, k2, err_status
+    integer :: nphi
 
     err_status = 1
+    nphi = size(phi)
     if(present(coeffs)) then
         b = coeffs
+        if(nphi .eq. 1) then
+            b%b212 = 0
+            b%b222 = 0
+            b%b122 = 0
+            b%b112 = 0
+            b%k = 1
+        endif
         err_status = 0
     else
         call interpol_coeff(r,phi,z,rout,phiout,zout,b,err)
     endif
 
+
     if(err_status.eq.0) then
         i = b%i
         j = b%j
         k = b%k
-        k2 = min(k+1,inter_grid%nphi)
+        if(nphi .eq. 1) then
+            k2 = min(k+1,nphi)
+        else
+            k2 = k+1
+        endif
 
-!!! This will probably need to get fixed once I sort out the coefficient issue
         dout = b%b111*d(i,j,k) + b%b121*d(i,j+1,k) + &
             b%b112*d(i,j,k2) + b%b122*d(i,j+1,k2) + &
             b%b211*d(i+1,j,k) + b%b221*d(i+1,j+1,k) + &
             b%b212*d(i+1,j,k2) + b%b222*d(i+1,j+1,k2)
-!!! End
     else
         dout = 0.d0
     endif
@@ -6154,10 +6162,18 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
 
     type(InterpolCoeffs3D) :: b
     integer :: i, j, k, k2, err_status
+    integer :: nphi
 
     err_status = 1
     if(present(coeffs)) then
         b = coeffs
+        if(nphi .eq. 1) then
+            b%b212 = 0
+            b%b222 = 0
+            b%b122 = 0
+            b%b112 = 0
+            b%k = 1
+        endif
         err_status = 0
     else
         call interpol_coeff(r,phi,z,rout,phiout,zout,b,err)
@@ -6167,13 +6183,15 @@ subroutine interpol3D_2D_arr(r, phi, z, f, rout, phiout, zout, fout, err, coeffs
         i = b%i
         j = b%j
         k = b%k
-        k2 = min(k+1,inter_grid%nphi)
-!!! This will probably need to get fixed once I sort out the coefficient issue
+        if(nphi .eq. 1) then
+            k2 = min(k+1,nphi)
+        else
+            k2 = k+1
+        endif
         fout = b%b111*f(:,:,i,j,k) + b%b121*f(:,:,i,j+1,k) + &
             b%b112*f(:,:,i,j,k2) + b%b122*f(:,:,i,j+1,k2) + &
             b%b211*f(:,:,i+1,j,k) + b%b221*f(:,:,i+1,j+1,k) + &
             b%b212*f(:,:,i+1,j,k2) + b%b222*f(:,:,i+1,j+1,k2)
-!!! End
     else
         fout = 0.0
     endif
@@ -6227,13 +6245,15 @@ subroutine in_plasma(xyz, inp, machine_coords, coeffs, uvw_out)
         i = b%i
         j = b%j
         k = b%k
-        k2 = min(k+1,inter_grid%nphi)
-!!! This will probably need to get fixed once I sort out the coefficient issue
+        if(inter_grid%nphi .eq. 1) then
+            k2 = min(k+1,inter_grid%nphi)
+        else
+            k2 = k+1
+        endif
         mask = b%b111*equil%mask(i,j,k) + b%b112*equil%mask(i,j,k2) + &
             b%b121*equil%mask(i,j+1,k) + b%b122*equil%mask(i,j+1,k2) + &
             b%b211*equil%mask(i+1,j,k) + b%b212*equil%mask(i+1,j,k2) + &
             b%b221*equil%mask(i+1,j+1,k) + b%b222*equil%mask(i+1,j+1,k2)
-!!! End
         if((mask.ge.0.5).and.(err.eq.0)) then
             inp = .True.
         endif
@@ -6270,14 +6290,16 @@ subroutine get_plasma(plasma, pos, ind)
         i = coeffs%i
         j = coeffs%j
         k = coeffs%k
-        k2 = min(k+1,inter_grid%nphi)
+        if(inter_grid%nphi .eq. 1) then
+            k2 = min(k+1,inter_grid%nphi)
+        else
+            k2 = k+1
+        endif
 
-!!! This will probably need to get fixed once I sort out the coefficient issue
         plasma = coeffs%b111*equil%plasma(i,j,k) + coeffs%b121*equil%plasma(i,j+1,k) + &
             coeffs%b112*equil%plasma(i,j,k2) + coeffs%b122*equil%plasma(i,j+1,k2) + &
             coeffs%b211*equil%plasma(i+1,j,k) + coeffs%b221*equil%plasma(i+1,j+1,k) + &
             coeffs%b212*equil%plasma(i+1,j,k2) + coeffs%b222*equil%plasma(i+1,j+1,k2)
-!!! End
 
         s = sin(phi) ; c = cos(phi)
         vrot_uvw(1) = plasma%vr*c - plasma%vt*s
@@ -6355,14 +6377,16 @@ subroutine get_fields(fields, pos, ind, machine_coords)
         i = coeffs%i
         j = coeffs%j
         k = coeffs%k
-        k2 = min(k+1,inter_grid%nphi)
+        if(inter_grid%nphi .eq. 1) then
+            k2 = min(k+1,inter_grid%nphi)
+        else
+            k2 = k+1
+        endif
 
-!!! This will probably need to get fixed once I sort out the coefficient issue
         fields = coeffs%b111*equil%fields(i,j,k) + coeffs%b121*equil%fields(i,j+1,k) + &
             coeffs%b112*equil%fields(i,j,k2) + coeffs%b122*equil%fields(i,j+1,k2) + &
             coeffs%b211*equil%fields(i+1,j,k) + coeffs%b221*equil%fields(i+1,j+1,k) + &
             coeffs%b212*equil%fields(i+1,j,k2) + coeffs%b222*equil%fields(i+1,j+1,k2)
-!!! End
 
         phi = atan2(uvw(2),uvw(1))
         s = sin(phi) ; c = cos(phi)
@@ -9475,7 +9499,7 @@ end subroutine pnpa_mc
 
 subroutine neutron_f
     !+ Calculate neutron emission rate using a fast-ion distribution function F(E,p,r,z)
-    integer :: ir, itphi, iz, ie, ip, iphi, nphi
+    integer :: ir, iphi, iz, ie, ip, igamma, ngamma
     type(LocalProfiles) :: plasma
     type(LocalEMFields) :: fields
     real(Float64) :: eb,pitch,r,z
@@ -9488,12 +9512,12 @@ subroutine neutron_f
     allocate(neutron%weight(fbm%nenergy,fbm%npitch,fbm%nr,fbm%nz,fbm%nphi))
     neutron%weight = 0.d0
 
-    nphi = 20
+    ngamma = 20
     !$OMP PARALLEL DO schedule(guided) private(fields,vi,ri,rg,pitch,eb,&
-    !$OMP& ir,itphi,iz,ie,ip,iphi,plasma,factor,uvw,uvw_vi,vnet_square,rate,erel)
+    !$OMP& ir,iphi,iz,ie,ip,igamma,plasma,factor,uvw,uvw_vi,vnet_square,rate,erel)
     z_loop: do iz = istart, fbm%nz, istep
-        tphi_loop: do itphi = 1, fbm%nphi
-            r_loop: do ir=1, fbm%nr
+        r_loop: do ir=1, fbm%nr
+            phi_loop: do iphi = 1, fbm%nphi
                 !! Calculate position
                 uvw(1) = fbm%r(ir)
                 uvw(2) = 0.d0
@@ -9504,16 +9528,13 @@ subroutine neutron_f
                 call get_fields(fields,pos=rg)
                 if(.not.fields%in_plasma) cycle r_loop
 
-!!! Might need to multiply by dphi below. I should also check the output of
-!!! this whole neutron stuff because it is what I don't understand most 
-                factor = 2*pi*fbm%r(ir)*fbm%dE*fbm%dp*fbm%dr*fbm%dz/nphi
-!!! End
+                factor = fbm%dphi*fbm%r(ir)*fbm%dE*fbm%dp*fbm%dr*fbm%dz/ngamma
                 !! Loop over energy/pitch/phi
                 pitch_loop: do ip = 1, fbm%npitch
                     pitch = fbm%pitch(ip)
                     energy_loop: do ie =1, fbm%nenergy
                         eb = fbm%energy(ie)
-                        gyro_loop: do iphi=1, nphi
+                        gyro_loop: do igamma=1, ngamma
                             call gyro_correction(fields,eb,pitch,ri,vi)
 
                             !! Get plasma parameters at particle position
@@ -9526,17 +9547,17 @@ subroutine neutron_f
 
                             !! Get neutron production rate
                             call get_neutron_rate(plasma, erel, rate)
-                            neutron%weight(ie,ip,ir,iz,itphi) = neutron%weight(ie,ip,ir,iz,itphi) &
+                            neutron%weight(ie,ip,ir,iz,iphi) = neutron%weight(ie,ip,ir,iz,iphi) &
                                                         + rate*factor
-                            rate = rate*fbm%f(ie,ip,ir,itphi,iz)*factor
+                            rate = rate*fbm%f(ie,ip,ir,iz,iphi)*factor
 
                             !! Store neutrons
                             call store_neutrons(rate)
                         enddo gyro_loop
                     enddo energy_loop
                 enddo pitch_loop
-            enddo r_loop
-        enddo tphi_loop
+            enddo phi_loop
+        enddo r_loop
     enddo z_loop
     !$OMP END PARALLEL DO
 

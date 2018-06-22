@@ -7592,18 +7592,12 @@ subroutine gyro_step(vi, fields, r_gyro)
         term1 = vpar*one_over_omega*dot_product(b_rtz,cuvrxb)
         grad_B(1) = (fields%br*fields%dbr_dr + fields%bt * fields%dbt_dr + fields%bz*fields%dbz_dr)/&
                     fields%b_abs
-!!! This looks like it worked, but I should double check it somehow at some point
-!!! Used to be = 0
         grad_B(2) = (fields%br*fields%dbr_dphi + fields%bt * fields%dbt_dphi + fields%bz*fields%dbz_dphi)/&
                     fields%b_abs
-!!! End
         grad_B(3) = (fields%br*fields%dbr_dz + fields%bt * fields%dbt_dz + fields%bz*fields%dbz_dz)/&
                     fields%b_abs
         rg_rtz(1) = rg_uvw(1)*cos(phi) + rg_uvw(2)*sin(phi)
-!!! This looks like it worked, but I should double check it somehow at some point
-!!! This seems like a matrix transformation
         rg_rtz(2) = -rg_uvw(1)*sin(phi) + rg_uvw(2)*cos(phi)
-!!! End
         rg_rtz(3) = rg_uvw(3)
         term2 = -1.0 / (2.0 * fields%b_abs)*dot_product(rg_rtz,grad_B)
         r_gyro = r_gyro * (1.0 - term1 - term2)

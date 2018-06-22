@@ -20,11 +20,9 @@ FUNCTION rz_grid,rmin,rmax,nr,zmin,zmax,nz,phimin=phimin,phimax=phimax,nphi=nphi
     ;+
     ;+##Example Usage
     ;+```idl
-;;; May need to double check this comment
-    ;+IDL> grid = rz_grid(0,200.0,200,-100,100,200,phimin=5*!dpi/4,phimax=7*!dpi/4,nphi=200)
+    ;+IDL> grid = rz_grid(0,200.0,200,-100,100,200,phimin=5*!dpi/4,phimax=7*!dpi/4,nphi=20)
     ;+```
 
-;;; Are the units right on this?
     if not keyword_set(phimin) then phimin = 0.0 ;rad
     if not keyword_set(phimax) then phimax = 0.01 ;rad
     if not keyword_set(nphi) then nphi = 1
@@ -36,7 +34,6 @@ FUNCTION rz_grid,rmin,rmax,nr,zmin,zmax,nz,phimin=phimin,phimax=phimax,nphi=nphi
     phi = phimin + dphi*dindgen(nphi)
     z = zmin + dz*dindgen(nz)
 
-;;; Do I need to change this?
     r2d = r # replicate(1,nz)
     z2d = replicate(1,nr) # z
 

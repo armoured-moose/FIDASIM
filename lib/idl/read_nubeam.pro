@@ -205,7 +205,6 @@ FUNCTION read_nubeam,filename,grid,btipsign=btipsign,e_range=e_range,p_range=p_r
     rows = n_elements(denf[0,*])
     cols = n_elements(denf[*,0])
     denf=rebin(denf,cols,rows,grid.nphi)
-;;;    data_source=rebin(data_source,cols,rows,grid.nphi)
     dim4 = n_elements(fbm_grid[0,0,0,*])
     dim3 = n_elements(fbm_grid[0,0,*,0])
     dim2 = n_elements(fbm_grid[0,*,0,0])

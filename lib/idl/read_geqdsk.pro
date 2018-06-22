@@ -176,7 +176,6 @@ FUNCTION read_geqdsk,filename,grid,flux=flux,g=g,btipsign=btipsign
     ez1=-(shift(epot,0,-1) - shift(epot,0,1))/(g.z[2]-g.z[0])
   
     ;; Interpolate cylindrical fields onto (r,w,phi) mesh
-;;; May need an if statement that takes into consideration the phi direction
     b_r=dblarr(grid.nr,grid.nz,grid.nphi) & b_t=b_r & b_z=b_r
     e_r=dblarr(grid.nr,grid.nz,grid.nphi) & e_t=e_r & e_z=e_r
 
@@ -189,7 +188,7 @@ FUNCTION read_geqdsk,filename,grid,flux=flux,g=g,btipsign=btipsign
             e_z[i,j,*]  =interpolate(ez1,[rgrid],[zgrid])
             b_z[i,j,*]  =interpolate(bz1,[rgrid],[zgrid])
     endfor
-  
+    
 ;;;Not sure if I need to change flux grid
     flux = fluxgrid
     mask = replicate(1,grid.nr,grid.nz,grid.nphi)

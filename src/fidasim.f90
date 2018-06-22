@@ -2021,7 +2021,6 @@ subroutine make_beam_grid
                 ri = [beam_grid%xc(i),beam_grid%yc(j), beam_grid%zc(k)]
                 call in_plasma(ri, inp)
                 if(inp) n = n + 1
-                endif
             enddo
         enddo
     enddo

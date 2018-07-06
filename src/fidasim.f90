@@ -452,6 +452,8 @@ type FastIonParticles
         !+ Number of particles
     integer(Int32) :: nclass = 1
         !+ Number of orbit classes
+    logical :: axisym = .True.
+        !+ Indicates whether distribution function is axisymmetric 
     type(FastIon), dimension(:), allocatable :: fast_ion
         !+ Fast-ion particles
 end type FastIonParticles
@@ -2576,16 +2578,11 @@ subroutine read_equilibrium
     inter_grid%dz = abs(inter_grid%z(2)-inter_grid%z(1))
     inter_grid%da = inter_grid%dr*inter_grid%dz
     if (inter_grid%nphi .eq. 1) then
-        inter_grid%dphi = 0.0d0
-!!! Should I set inter_grid%dv = inter_grid%dphi, or keep as is
-        inter_grid%dv = 0.0d0
-!!! End
+        inter_grid%dphi = 2*pi
     else
         inter_grid%dphi = abs(inter_grid%phi(2)-inter_grid%phi(1))
-!!! Omitting the r factor in dv
-        inter_grid%dv = inter_grid%dr*inter_grid%dphi*inter_grid%dz
-!!! End
     endif
+    inter_grid%dv = inter_grid%dr*inter_grid%dphi*inter_grid%dz
 
     if(inputs%verbose.ge.1) then
         write(*,'(a)') '---- Interpolation grid settings ----'
@@ -2593,7 +2590,6 @@ subroutine read_equilibrium
         write(*,'(T2,"Nphi: ",i3)') inter_grid%nphi
         write(*,'(T2,"Nz: ",i3)') inter_grid%nz
         write(*,'(T2,"dA: ", f5.2," [cm^2]")') inter_grid%da
-        write(*,'(T2,"dV: ", f5.2," [cm^3]")') inter_grid%dv
         write(*,*) ''
     endif
 
@@ -2756,7 +2752,9 @@ subroutine read_f(fid, error)
     call h5ltread_dataset_double_f(fid, "/z", fbm%z, dims(4:4), error)
     call h5ltread_dataset_double_f(fid, "/phi", fbm%phi, dims(5:5), error)
 
+!!! I need to do something with denf
     equil%plasma%denf = fbm%denf
+    print*,'plasma denf = ',equil%plasma(35,50,9)%denf
 
     fbm%dE = abs(fbm%energy(2) - fbm%energy(1))
     fbm%dp = abs(fbm%pitch(2) - fbm%pitch(1))
@@ -2803,14 +2801,14 @@ subroutine read_mc(fid, error)
         !+ Error code
 
     integer(HSIZE_T), dimension(1) :: dims
-    integer(Int32) :: i,j,ii,ir,iz,iphi
-    real(Float64) :: phi,phi_enter,phi_exit,delta_phi
-    real(Float64), dimension(3) :: uvw,ri,vi,e1_xyz,e2_xyz,C_xyz,dum
+    integer(Int32) :: i,j,ii,ir,iz,iphi,nphi
+    real(Float64) :: phi,phi_enter,phi_exit,delta_phi,xp,yp,zp
+    real(Float64), dimension(3) :: uvw,xyz,ri,vi,e1_xyz,e2_xyz,C_xyz,dum
     integer(Int32), dimension(1) :: minpos
     real(Float64), dimension(:), allocatable :: weight
     type(LocalEMFields) :: fields
     integer :: cnt,num
-    logical :: inp
+    logical :: inp,path_valid
     character(len=32) :: dist_type_name = ''
 
     if(inputs%verbose.ge.1) then
@@ -2827,6 +2825,10 @@ subroutine read_mc(fid, error)
     dims(1) = particles%nparticle
     call h5ltread_dataset_double_f(fid, "/r", particles%fast_ion%r, dims, error)
     call h5ltread_dataset_double_f(fid, "/z", particles%fast_ion%z, dims, error)
+    call h5ltpath_valid_f(fid, "/phi", .True., path_valid, error)
+    if(path_valid) then
+        call h5ltread_dataset_double_f(fid, "/phi", particles%fast_ion%phi, dims, error)
+    endif 
     call h5ltread_dataset_int_f(fid, "/class", particles%fast_ion%class, dims, error)
 
     if(any(particles%fast_ion%class.gt.particles%nclass)) then
@@ -2857,31 +2859,59 @@ subroutine read_mc(fid, error)
     cnt=0
     e1_xyz = matmul(beam_grid%inv_basis,[1.0,0.0,0.0])
     e2_xyz = matmul(beam_grid%inv_basis,[0.0,1.0,0.0])
+    if(size(particles%fast_ion%phi).gt.1) particles%axisym = .False.
     !$OMP PARALLEL DO schedule(guided) private(i,ii,j,ir,iz,iphi,minpos,fields,uvw,phi,ri,vi, &
-    !$OMP& delta_phi,phi_enter,phi_exit,C_xyz)
+    !$OMP& delta_phi,phi_enter,phi_exit,C_xyz,xyz,xp,yp,zp)
     particle_loop: do i=1,particles%nparticle
         if(inputs%verbose.ge.2) then
             WRITE(*,'(f7.2,"% completed",a,$)') cnt/real(particles%nparticle)*100,char(13)
         endif
-        uvw = [particles%fast_ion(i)%r, 0.d0, particles%fast_ion(i)%z]
+        !! Bound fast_ion(i)%phi between 0 and 2*pi
+        do while (particles%fast_ion(i)%phi .gt. 2*pi)
+            particles%fast_ion(i)%phi = particles%fast_ion(i)%phi - 2*pi
+        enddo
+
+        do while (particles%fast_ion(i)%phi .lt. 0.0)
+            particles%fast_ion(i)%phi = particles%fast_ion(i)%phi + 2*pi
+        enddo
+        if(particles%axisym) then
+            uvw = [particles%fast_ion(i)%r, 0.d0 , particles%fast_ion(i)%z]
+        else
+            xp = particles%fast_ion(i)%r * cos(particles%fast_ion(i)%phi)
+            yp = particles%fast_ion(i)%r * sin(particles%fast_ion(i)%phi)
+            zp = particles%fast_ion(i)%z
+            uvw = [xp,yp,zp]
+        endif
         call in_plasma(uvw,inp,machine_coords=.True.)
         if(.not.inp) cycle particle_loop
 
-        phi_enter = 0.0
-        phi_exit = 0.0
-        dum = [0.d0, 0.d0, particles%fast_ion(i)%z]
-        call uvw_to_xyz(dum, C_xyz)
-        call circle_grid_intersect(C_xyz,e1_xyz,e2_xyz,particles%fast_ion(i)%r,phi_enter,phi_exit)
-        delta_phi = phi_exit-phi_enter
-        if(delta_phi.gt.0) then
-            particles%fast_ion(i)%cross_grid = .True.
+        if(particles%axisym) then
+            phi_enter = 0.0
+            phi_exit = 0.0
+            dum = [0.d0, 0.d0, particles%fast_ion(i)%z]
+            call uvw_to_xyz(dum, C_xyz)
+            call circle_grid_intersect(C_xyz,e1_xyz,e2_xyz,particles%fast_ion(i)%r,phi_enter,phi_exit)
+            delta_phi = phi_exit-phi_enter
+            if(delta_phi.gt.0) then
+                particles%fast_ion(i)%cross_grid = .True.
+            else
+                particles%fast_ion(i)%cross_grid = .False.
+                delta_phi = 2*pi
+            endif
+            particles%fast_ion(i)%phi_enter = phi_enter
+            particles%fast_ion(i)%delta_phi = delta_phi
+            particles%fast_ion(i)%weight = weight(i)*(delta_phi/(2*pi))/beam_grid%dv
         else
-            particles%fast_ion(i)%cross_grid = .False.
-            delta_phi = 2*pi
+            call uvw_to_xyz(uvw,xyz)
+            if(in_grid(xyz)) then
+                particles%fast_ion(i)%cross_grid = .True.
+            else
+                particles%fast_ion(i)%cross_grid = .False.
+            endif
+            particles%fast_ion(i)%phi_enter = particles%fast_ion(i)%phi
+            particles%fast_ion(i)%delta_phi = 2*pi
+            particles%fast_ion(i)%weight = weight(i)/beam_grid%dv
         endif
-        particles%fast_ion(i)%phi_enter = phi_enter
-        particles%fast_ion(i)%delta_phi = delta_phi
-        particles%fast_ion(i)%weight = weight(i)*(delta_phi/(2*pi))/beam_grid%dv
 
         minpos = minloc(abs(inter_grid%r - particles%fast_ion(i)%r))
         ir = minpos(1)
@@ -2898,6 +2928,9 @@ subroutine read_mc(fid, error)
     !$OMP END PARALLEL DO
 
     num = count(particles%fast_ion%cross_grid)
+    print*, "Cross grid =",num/dble(particles%nparticle)*100d0,"%"
+    print*, "Size = ",size(particles%fast_ion%cross_grid)
+    print*, "Axisymm = ",particles%axisym
     if(num.le.0) then
         if(inputs%verbose.ge.0) then
             write(*,'(a)') 'READ_MC: No mc particles in beam grid'
@@ -7180,9 +7213,7 @@ subroutine attenuate(ri, rf, vi, states, dstep_in)
     if(present(dstep_in)) then
         dstep=dstep_in
     else
-!!! I wonder if I will need an inter_grid%dv here 
         dstep = sqrt(inter_grid%da) !cm
-!!! End
     endif
 
     max_dis = norm2(rf-ri)
@@ -8815,9 +8846,13 @@ subroutine fida_mc
         if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
         phi_loop: do iphi=1,nphi
-            !! Pick random torodial angle
-            call randu(randomu)
-            phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            if(particles%axisym) then
+                !! Pick random toroidal angle
+                call randu(randomu)
+                phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            else
+                phi = fast_ion%phi
+            endif
             s = sin(phi) ; c = cos(phi)
 
             !! Calculate position in machine coordinates
@@ -8907,9 +8942,13 @@ subroutine pfida_mc
         if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
         phi_loop: do iphi=1,nphi
-            !! Pick random torodial angle
-            call randu(randomu)
-            phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            if(particles%axisym) then
+                !! Pick random toroidal angle
+                call randu(randomu)
+                phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            else
+                phi = fast_ion%phi
+            endif
             s = sin(phi) ; c = cos(phi)
 
             !! Calculate position in machine coordinates
@@ -9229,9 +9268,13 @@ subroutine npa_mc
         if(fast_ion%vabs.eq.0)cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
         phi_loop: do iphi=1,nphi
-            !! Pick random torodial angle
-            call randu(randomu)
-            phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            if(particles%axisym) then
+                !! Pick random toroidal angle
+                call randu(randomu)
+                phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            else
+                phi = fast_ion%phi
+            endif
             s = sin(phi) ; c = cos(phi)
 
             !! Calculate position in machine coordinates
@@ -9374,9 +9417,13 @@ subroutine pnpa_mc
         if(fast_ion%vabs.eq.0)cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
         phi_loop: do iphi=1,nphi
-            !! Pick random torodial angle
-            call randu(randomu)
-            phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            if(particles%axisym) then
+                !! Pick random toroidal angle
+                call randu(randomu)
+                phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            else
+                phi = fast_ion%phi
+            endif
             s = sin(phi) ; c = cos(phi)
 
             !! Calculate position in machine coordinates
@@ -9584,6 +9631,7 @@ subroutine neutron_mc
     real(Float64), dimension(3) :: vi
     real(Float64), dimension(3) :: uvw, uvw_vi
     real(Float64)  :: vnet_square
+    real(Float64)  :: phi, s, c
 
     if(inputs%verbose.ge.1) then
         write(*,'(T6,"# of markers: ",i9)') particles%nparticle
@@ -9591,15 +9639,21 @@ subroutine neutron_mc
 
     rate=0.0
     nphi = 20
-    !$OMP PARALLEL DO schedule(guided) private(iion,fast_ion,vi,ri,rg, &
+    !$OMP PARALLEL DO schedule(guided) private(iion,fast_ion,vi,ri,rg,s,c, &
     !$OMP& plasma,fields,uvw,uvw_vi,vnet_square,rate,eb,iphi)
     loop_over_fast_ions: do iion=istart,particles%nparticle,istep
         fast_ion = particles%fast_ion(iion)
         if(fast_ion%vabs.eq.0.d0) cycle loop_over_fast_ions
 
-        !! Calculate position
-        uvw(1) = fast_ion%r
-        uvw(2) = 0.0
+        !! Calculate position in machine coordinates
+        if(particles%axisym) then
+            phi = 0.d0
+        else
+            phi = fast_ion%phi
+        endif
+        s = sin(phi) ; c = cos(phi)
+        uvw(1) = fast_ion%r*c
+        uvw(2) = fast_ion%r*s
         uvw(3) = fast_ion%z
 
         if(inputs%dist_type.eq.2) then

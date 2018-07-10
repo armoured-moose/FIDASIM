@@ -2828,6 +2828,7 @@ subroutine read_mc(fid, error)
     call h5ltpath_valid_f(fid, "/phi", .True., path_valid, error)
     if(path_valid) then
         call h5ltread_dataset_double_f(fid, "/phi", particles%fast_ion%phi, dims, error)
+        particles%axisym = .False.
     endif 
     call h5ltread_dataset_int_f(fid, "/class", particles%fast_ion%class, dims, error)
 
@@ -2859,7 +2860,6 @@ subroutine read_mc(fid, error)
     cnt=0
     e1_xyz = matmul(beam_grid%inv_basis,[1.0,0.0,0.0])
     e2_xyz = matmul(beam_grid%inv_basis,[0.0,1.0,0.0])
-    if(size(particles%fast_ion%phi).gt.1) particles%axisym = .False.
     !$OMP PARALLEL DO schedule(guided) private(i,ii,j,ir,iz,iphi,minpos,fields,uvw,phi,ri,vi, &
     !$OMP& delta_phi,phi_enter,phi_exit,C_xyz,xyz,xp,yp,zp)
     particle_loop: do i=1,particles%nparticle

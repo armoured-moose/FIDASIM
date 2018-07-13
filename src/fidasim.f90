@@ -2754,7 +2754,7 @@ subroutine read_f(fid, error)
 
 !!! I need to do something with denf
     equil%plasma%denf = fbm%denf
-    print*,'plasma denf = ',equil%plasma(35,50,9)%denf
+!!!    print*,'PLASMA DENF(35,50,9) = ',equil%plasma(35,50,9)%denf
 
     fbm%dE = abs(fbm%energy(2) - fbm%energy(1))
     fbm%dp = abs(fbm%pitch(2) - fbm%pitch(1))
@@ -2903,11 +2903,8 @@ subroutine read_mc(fid, error)
             particles%fast_ion(i)%weight = weight(i)*(delta_phi/(2*pi))/beam_grid%dv
         else
             call uvw_to_xyz(uvw,xyz)
-            if(in_grid(xyz)) then
-                particles%fast_ion(i)%cross_grid = .True.
-            else
-                particles%fast_ion(i)%cross_grid = .False.
-            endif
+!!! How do I know that in_grid is working the way it should be?
+            particles%fast_ion(i)%cross_grid = in_grid(xyz)
             particles%fast_ion(i)%phi_enter = particles%fast_ion(i)%phi
             particles%fast_ion(i)%delta_phi = 2*pi
             particles%fast_ion(i)%weight = weight(i)/beam_grid%dv
@@ -2915,6 +2912,7 @@ subroutine read_mc(fid, error)
 
         minpos = minloc(abs(inter_grid%r - particles%fast_ion(i)%r))
         ir = minpos(1)
+!!! What is going on here?
         minpos = minloc(abs(inter_grid%phi - particles%fast_ion(i)%phi))
         iphi = minpos(1)
         minpos = minloc(abs(inter_grid%z - particles%fast_ion(i)%z))
@@ -7213,6 +7211,7 @@ subroutine attenuate(ri, rf, vi, states, dstep_in)
     if(present(dstep_in)) then
         dstep=dstep_in
     else
+!!! 100% sure this shouldn't be dv?
         dstep = sqrt(inter_grid%da) !cm
     endif
 
@@ -7643,6 +7642,7 @@ subroutine gyro_step(vi, fields, r_gyro)
 
 end subroutine gyro_step
 
+!!!    call gyro_correction(fields, fast_ion%energy, fast_ion%pitch, ri, vi)
 subroutine gyro_correction(fields, energy, pitch, rp, vp, phi_in)
     !+ Calculates gyro correction for Guiding Center MC distribution calculation
     type(LocalEMFields), intent(in)          :: fields
@@ -8812,7 +8812,7 @@ end subroutine pfida_f
 
 subroutine fida_mc
     !+ Calculate Active FIDA emission using a Monte Carlo Fast-ion distribution
-    integer :: iion,iphi,nphi
+    integer :: iion,igamma,ngamma
     type(FastIon) :: fast_ion
     type(LocalEMFields) :: fields
     type(LocalProfiles) :: plasma
@@ -8831,34 +8831,39 @@ subroutine fida_mc
     real(Float64) :: photons !! photon flux
     integer, dimension(5) :: neut_types=[1,2,3,4,5]
     real(Float64), dimension(3) :: uvw, uvw_vi
-    real(Float64)  :: s, c
+    real(Float64)  :: s, c, counter, ps, pc
     real(Float64), dimension(1) :: randomu
 
-    nphi = ceiling(dble(inputs%n_fida)/particles%nparticle)
+    ngamma = ceiling(dble(inputs%n_fida)/particles%nparticle)
     if(inputs%verbose.ge.1) then
-        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*nphi,Int64)
+        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*ngamma,Int64)
     endif
 
-    !$OMP PARALLEL DO schedule(guided) private(iion,iphi,fast_ion,vi,ri,phi,tracks,s,c, &
+    !$OMP PARALLEL DO schedule(guided) private(iion,igamma,fast_ion,vi,ri,phi,tracks,s,c, &
     !$OMP& randomu,plasma,fields,uvw,uvw_vi,ntrack,jj,rates,denn,los_intersect,states,photons)
     loop_over_fast_ions: do iion=istart,particles%nparticle,istep
         fast_ion = particles%fast_ion(iion)
-        if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
-        if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
-        phi_loop: do iphi=1,nphi
+        if(particles%fast_ion(iion)%vabs.eq.0) cycle loop_over_fast_ions
+        if(.not.particles%fast_ion(iion)%cross_grid) cycle loop_over_fast_ions
+        if(particles%fast_ion(iion)%vabs.eq.0) cycle loop_over_fast_ions
+        if(.not.particles%fast_ion(iion)%cross_grid) cycle loop_over_fast_ions
+        gamma_loop: do igamma=1,ngamma
             if(particles%axisym) then
                 !! Pick random toroidal angle
                 call randu(randomu)
                 phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
             else
-                phi = fast_ion%phi
+                phi = particles%fast_ion(iion)%phi
             endif
-            s = sin(phi) ; c = cos(phi)
+!            s = sin(particles%fast_ion(iion)%phi)
+!            c = cos(particles%fast_ion(iion)%phi)
+            s = sin(phi)
+            c = cos(phi)
 
             !! Calculate position in machine coordinates
-            uvw(1) = fast_ion%r*c
-            uvw(2) = fast_ion%r*s
-            uvw(3) = fast_ion%z
+            uvw(1) = particles%fast_ion(iion)%r*c
+            uvw(2) = particles%fast_ion(iion)%r*s
+            uvw(3) = particles%fast_ion(iion)%z
 
             !! Convert to beam grid coordinates
             call uvw_to_xyz(uvw, ri)
@@ -8868,26 +8873,26 @@ subroutine fida_mc
                 call get_fields(fields, pos=ri)
 
                 !! Correct for gyro motion and get particle position and velocity
-                call gyro_correction(fields, fast_ion%energy, fast_ion%pitch, ri, vi)
+                call gyro_correction(fields, particles%fast_ion(iion)%energy, particles%fast_ion(iion)%pitch, ri, vi)
             else !! Full Orbit
                 !! Calculate velocity vector
-                uvw_vi(1) = c*fast_ion%vr - s*fast_ion%vt
-                uvw_vi(2) = s*fast_ion%vr + c*fast_ion%vt
-                uvw_vi(3) = fast_ion%vz
+                uvw_vi(1) = c*particles%fast_ion(iion)%vr - s*particles%fast_ion(iion)%vt
+                uvw_vi(2) = s*particles%fast_ion(iion)%vr + c*particles%fast_ion(iion)%vt
+                uvw_vi(3) = particles%fast_ion(iion)%vz
                 vi = matmul(beam_grid%inv_basis,uvw_vi)
             endif
 
             !! Track particle through grid
             call track(ri, vi, tracks, ntrack, los_intersect)
-            if(.not.los_intersect) cycle phi_loop
-            if(ntrack.eq.0)cycle phi_loop
+            if(.not.los_intersect) cycle gamma_loop
+            if(ntrack.eq.0)cycle gamma_loop
 
             !! Calculate CX probability
             call get_beam_cx_rate(tracks(1)%ind,ri,vi,beam_ion,neut_types,rates)
-            if(sum(rates).le.0.)cycle phi_loop
+            if(sum(rates).le.0.)cycle gamma_loop
 
             !! Weight CX rates by ion source density
-            states=rates*fast_ion%weight/nphi
+            states=rates*particles%fast_ion(iion)%weight/ngamma
 
             !! Calculate the spectra produced in each cell along the path
             loop_along_track: do jj=1,ntrack
@@ -8895,9 +8900,10 @@ subroutine fida_mc
 
                 call colrad(plasma,beam_ion, vi, tracks(jj)%time, states, denn, photons)
 
-                call store_fida_photons(tracks(jj)%pos, vi, photons, fast_ion%class)
+                call store_fida_photons(tracks(jj)%pos, vi, photons, particles%fast_ion(iion)%class)
+!!!                print*, 'photons stored = ',photons, ' jj = ',jj,'ntrack =', ntrack
             enddo loop_along_track
-        enddo phi_loop
+        enddo gamma_loop
     enddo loop_over_fast_ions
     !$OMP END PARALLEL DO
 
@@ -9321,6 +9327,7 @@ subroutine npa_mc
                         states=rates*fast_ion%weight/nphi
 
                         !! Attenuate states as the particle move through plasma
+                        !!! What if it attenuates too much?
                         call attenuate(ri,rf,vi,states)
 
                         !! Store NPA Flux
@@ -9414,7 +9421,7 @@ subroutine pnpa_mc
     !$OMP& randomu,rg,fields,uvw,uvw_vi,rates,states,flux,det,ichan,gs,nrange,gyrange,theta,dtheta)
     loop_over_fast_ions: do iion=istart,particles%nparticle,istep
         fast_ion = particles%fast_ion(iion)
-        if(fast_ion%vabs.eq.0)cycle loop_over_fast_ions
+        if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
         phi_loop: do iphi=1,nphi
             if(particles%axisym) then

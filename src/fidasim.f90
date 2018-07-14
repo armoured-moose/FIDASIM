@@ -1161,6 +1161,7 @@ subroutine fast_ion_assign(p1, p2)
     p1%cross_grid = p2%cross_grid
     p1%r          = p2%r
     p1%z          = p2%z
+    p1%phi        = p2%phi
     p1%phi_enter  = p2%phi_enter
     p1%delta_phi  = p2%delta_phi
     p1%energy     = p2%energy
@@ -8843,111 +8844,9 @@ subroutine fida_mc
     !$OMP& randomu,plasma,fields,uvw,uvw_vi,ntrack,jj,rates,denn,los_intersect,states,photons)
     loop_over_fast_ions: do iion=istart,particles%nparticle,istep
         fast_ion = particles%fast_ion(iion)
-        if(particles%fast_ion(iion)%vabs.eq.0) cycle loop_over_fast_ions
-        if(.not.particles%fast_ion(iion)%cross_grid) cycle loop_over_fast_ions
-        if(particles%fast_ion(iion)%vabs.eq.0) cycle loop_over_fast_ions
-        if(.not.particles%fast_ion(iion)%cross_grid) cycle loop_over_fast_ions
-        gamma_loop: do igamma=1,ngamma
-            if(particles%axisym) then
-                !! Pick random toroidal angle
-                call randu(randomu)
-                phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
-            else
-                phi = particles%fast_ion(iion)%phi
-            endif
-!            s = sin(particles%fast_ion(iion)%phi)
-!            c = cos(particles%fast_ion(iion)%phi)
-            s = sin(phi)
-            c = cos(phi)
-
-            !! Calculate position in machine coordinates
-            uvw(1) = particles%fast_ion(iion)%r*c
-            uvw(2) = particles%fast_ion(iion)%r*s
-            uvw(3) = particles%fast_ion(iion)%z
-
-            !! Convert to beam grid coordinates
-            call uvw_to_xyz(uvw, ri)
-
-            if(inputs%dist_type.eq.2) then
-                !! Get electomagnetic fields
-                call get_fields(fields, pos=ri)
-
-                !! Correct for gyro motion and get particle position and velocity
-                call gyro_correction(fields, particles%fast_ion(iion)%energy, particles%fast_ion(iion)%pitch, ri, vi)
-            else !! Full Orbit
-                !! Calculate velocity vector
-                uvw_vi(1) = c*particles%fast_ion(iion)%vr - s*particles%fast_ion(iion)%vt
-                uvw_vi(2) = s*particles%fast_ion(iion)%vr + c*particles%fast_ion(iion)%vt
-                uvw_vi(3) = particles%fast_ion(iion)%vz
-                vi = matmul(beam_grid%inv_basis,uvw_vi)
-            endif
-
-            !! Track particle through grid
-            call track(ri, vi, tracks, ntrack, los_intersect)
-            if(.not.los_intersect) cycle gamma_loop
-            if(ntrack.eq.0)cycle gamma_loop
-
-            !! Calculate CX probability
-            call get_beam_cx_rate(tracks(1)%ind,ri,vi,beam_ion,neut_types,rates)
-            if(sum(rates).le.0.)cycle gamma_loop
-
-            !! Weight CX rates by ion source density
-            states=rates*particles%fast_ion(iion)%weight/ngamma
-
-            !! Calculate the spectra produced in each cell along the path
-            loop_along_track: do jj=1,ntrack
-                call get_plasma(plasma,pos=tracks(jj)%pos)
-
-                call colrad(plasma,beam_ion, vi, tracks(jj)%time, states, denn, photons)
-
-                call store_fida_photons(tracks(jj)%pos, vi, photons, particles%fast_ion(iion)%class)
-!!!                print*, 'photons stored = ',photons, ' jj = ',jj,'ntrack =', ntrack
-            enddo loop_along_track
-        enddo gamma_loop
-    enddo loop_over_fast_ions
-    !$OMP END PARALLEL DO
-
-#ifdef _MPI
-    call co_sum(spec%fida)
-#endif
-
-end subroutine fida_mc
-
-subroutine pfida_mc
-    !+ Calculate Passive FIDA emission using a Monte Carlo Fast-ion distribution
-    integer :: iion,iphi,nphi
-    type(FastIon) :: fast_ion
-    type(LocalEMFields) :: fields
-    type(LocalProfiles) :: plasma
-    real(Float64) :: phi
-    real(Float64), dimension(3) :: ri      !! start position
-    real(Float64), dimension(3) :: vi      !! velocity of fast ions
-    !! Determination of the CX probability
-    real(Float64), dimension(nlevs) :: denn    !!  neutral dens (n=1-4)
-    real(Float64), dimension(nlevs) :: rates    !! CX rates
-    !! Collisiional radiative model along track
-    real(Float64), dimension(nlevs) :: states  ! Density of n-states
-    integer :: ntrack
-    type(ParticleTrack), dimension(beam_grid%ntrack) :: tracks
-    logical :: los_intersect
-    integer :: jj      !! counter along track
-    real(Float64) :: photons !! photon flux
-    real(Float64), dimension(3) :: uvw, uvw_vi
-    real(Float64)  :: s, c
-    real(Float64), dimension(1) :: randomu
-
-    nphi = ceiling(dble(inputs%n_pfida)/particles%nparticle)
-    if(inputs%verbose.ge.1) then
-        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*nphi,Int64)
-    endif
-
-    !$OMP PARALLEL DO schedule(guided) private(iion,iphi,fast_ion,vi,ri,phi,tracks,s,c, &
-    !$OMP& randomu,plasma,fields,uvw,uvw_vi,ntrack,jj,rates,denn,los_intersect,states,photons)
-    loop_over_fast_ions: do iion=istart,particles%nparticle,istep
-        fast_ion = particles%fast_ion(iion)
         if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
-        phi_loop: do iphi=1,nphi
+        gamma_loop: do igamma=1,ngamma
             if(particles%axisym) then
                 !! Pick random toroidal angle
                 call randu(randomu)
@@ -8955,7 +8854,8 @@ subroutine pfida_mc
             else
                 phi = fast_ion%phi
             endif
-            s = sin(phi) ; c = cos(phi)
+            s = sin(phi)
+            c = cos(phi)
 
             !! Calculate position in machine coordinates
             uvw(1) = fast_ion%r*c
@@ -8981,16 +8881,114 @@ subroutine pfida_mc
 
             !! Track particle through grid
             call track(ri, vi, tracks, ntrack, los_intersect)
-            if(.not.los_intersect) cycle phi_loop
-            if(ntrack.eq.0)cycle phi_loop
+            if(.not.los_intersect) cycle gamma_loop
+            if(ntrack.eq.0)cycle gamma_loop
+
+            !! Calculate CX probability
+            call get_beam_cx_rate(tracks(1)%ind,ri,vi,beam_ion,neut_types,rates)
+            if(sum(rates).le.0.)cycle gamma_loop
+
+            !! Weight CX rates by ion source density
+            states=rates*fast_ion%weight/ngamma
+
+            !! Calculate the spectra produced in each cell along the path
+            loop_along_track: do jj=1,ntrack
+                call get_plasma(plasma,pos=tracks(jj)%pos)
+
+                call colrad(plasma,beam_ion, vi, tracks(jj)%time, states, denn, photons)
+
+                call store_fida_photons(tracks(jj)%pos, vi, photons, fast_ion%class)
+!!!                print*, 'photons stored = ',photons, ' jj = ',jj,'ntrack =', ntrack
+            enddo loop_along_track
+        enddo gamma_loop
+    enddo loop_over_fast_ions
+    !$OMP END PARALLEL DO
+
+#ifdef _MPI
+    call co_sum(spec%fida)
+#endif
+
+end subroutine fida_mc
+
+subroutine pfida_mc
+    !+ Calculate Passive FIDA emission using a Monte Carlo Fast-ion distribution
+    integer :: iion,igamma,ngamma
+    type(FastIon) :: fast_ion
+    type(LocalEMFields) :: fields
+    type(LocalProfiles) :: plasma
+    real(Float64) :: phi
+    real(Float64), dimension(3) :: ri      !! start position
+    real(Float64), dimension(3) :: vi      !! velocity of fast ions
+    !! Determination of the CX probability
+    real(Float64), dimension(nlevs) :: denn    !!  neutral dens (n=1-4)
+    real(Float64), dimension(nlevs) :: rates    !! CX rates
+    !! Collisiional radiative model along track
+    real(Float64), dimension(nlevs) :: states  ! Density of n-states
+    integer :: ntrack
+    type(ParticleTrack), dimension(beam_grid%ntrack) :: tracks
+    logical :: los_intersect
+    integer :: jj      !! counter along track
+    real(Float64) :: photons !! photon flux
+    real(Float64), dimension(3) :: uvw, uvw_vi
+    real(Float64)  :: s, c
+    real(Float64), dimension(1) :: randomu
+
+    ngamma = ceiling(dble(inputs%n_pfida)/particles%nparticle)
+    if(inputs%verbose.ge.1) then
+        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*ngamma,Int64)
+    endif
+
+    !$OMP PARALLEL DO schedule(guided) private(iion,igamma,fast_ion,vi,ri,phi,tracks,s,c, &
+    !$OMP& randomu,plasma,fields,uvw,uvw_vi,ntrack,jj,rates,denn,los_intersect,states,photons)
+    loop_over_fast_ions: do iion=istart,particles%nparticle,istep
+        fast_ion = particles%fast_ion(iion)
+        if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
+        if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
+        gamma_loop: do igamma=1,ngamma
+            if(particles%axisym) then
+                !! Pick random toroidal angle
+                call randu(randomu)
+                phi = fast_ion%phi_enter + fast_ion%delta_phi*randomu(1)
+            else
+                phi = fast_ion%phi
+            endif
+            s = sin(phi)
+            c = cos(phi)
+
+            !! Calculate position in machine coordinates
+            uvw(1) = fast_ion%r*c
+            uvw(2) = fast_ion%r*s
+            uvw(3) = fast_ion%z
+
+            !! Convert to beam grid coordinates
+            call uvw_to_xyz(uvw, ri)
+
+            if(inputs%dist_type.eq.2) then
+                !! Get electomagnetic fields
+                call get_fields(fields, pos=ri)
+
+                !! Correct for gyro motion and get particle position and velocity
+                call gyro_correction(fields, fast_ion%energy, fast_ion%pitch, ri, vi)
+            else !! Full Orbit
+                !! Calculate velocity vector
+                uvw_vi(1) = c*fast_ion%vr - s*fast_ion%vt
+                uvw_vi(2) = s*fast_ion%vr + c*fast_ion%vt
+                uvw_vi(3) = fast_ion%vz
+                vi = matmul(beam_grid%inv_basis,uvw_vi)
+            endif
+
+            !! Track particle through grid
+            call track(ri, vi, tracks, ntrack, los_intersect)
+            if(.not.los_intersect) cycle gamma_loop
+            if(ntrack.eq.0) cycle gamma_loop
 
             !! Calculate CX probability
             call get_plasma(plasma, pos=ri)
             call bt_cx_rates(plasma, plasma%denn, vi, beam_ion, rates)
-            if(sum(rates).le.0.)cycle phi_loop
+            if(sum(rates).le.0.) cycle gamma_loop
 
             !! Weight CX rates by ion source density
-            states=rates*fast_ion%weight/nphi
+            states=rates*fast_ion%weight/ngamma
 
             !! Calculate the spectra produced in each cell along the path
             loop_along_track: do jj=1,ntrack
@@ -9000,7 +8998,7 @@ subroutine pfida_mc
 
                 call store_fida_photons(tracks(jj)%pos, vi, photons, fast_ion%class,passive=.True.)
             enddo loop_along_track
-        enddo phi_loop
+        enddo gamma_loop
     enddo loop_over_fast_ions
     !$OMP END PARALLEL DO
 
@@ -9245,7 +9243,7 @@ end subroutine pnpa_f
 
 subroutine npa_mc
     !+ Calculate Active NPA flux using a Monte Carlo fast-ion distribution
-    integer :: iion,iphi,nphi,npart
+    integer :: iion,igamma,ngamma,npart
     type(FastIon) :: fast_ion
     real(Float64) :: phi,theta,dtheta
     real(Float64), dimension(3) :: ri, rf, rg, vi
@@ -9262,18 +9260,18 @@ subroutine npa_mc
     real(Float64) :: s,c
     real(Float64), dimension(1) :: randomu
 
-    nphi = ceiling(dble(inputs%n_npa)/particles%nparticle)
+    ngamma = ceiling(dble(inputs%n_npa)/particles%nparticle)
     if(inputs%verbose.ge.1) then
-        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*nphi,Int64)
+        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*ngamma,Int64)
     endif
 
-    !$OMP PARALLEL DO schedule(guided) private(iion,iphi,ind,fast_ion,vi,ri,rf,phi,s,c,ir,it, &
+    !$OMP PARALLEL DO schedule(guided) private(iion,igamma,ind,fast_ion,vi,ri,rf,phi,s,c,ir,it, &
     !$OMP& randomu,rg,fields,uvw,uvw_vi,rates,states,flux,det,ichan,gs,nrange,gyrange,theta,dtheta)
     loop_over_fast_ions: do iion=istart,particles%nparticle,istep
         fast_ion = particles%fast_ion(iion)
-        if(fast_ion%vabs.eq.0)cycle loop_over_fast_ions
+        if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
-        phi_loop: do iphi=1,nphi
+        gamma_loop: do igamma=1,ngamma
             if(particles%axisym) then
                 !! Pick random toroidal angle
                 call randu(randomu)
@@ -9281,7 +9279,8 @@ subroutine npa_mc
             else
                 phi = fast_ion%phi
             endif
-            s = sin(phi) ; c = cos(phi)
+            s = sin(phi)
+            c = cos(phi)
 
             !! Calculate position in machine coordinates
             uvw(1) = fast_ion%r*c
@@ -9321,10 +9320,11 @@ subroutine npa_mc
 
                         !! Calculate CX probability with beam and halo neutrals
                         call get_beam_cx_rate(ind,ri,vi,beam_ion,neut_types,rates)
+                        print*,'ir = ',ir,'nrange = ',nrange
                         if(sum(rates).le.0.) cycle gyro_range_loop
 
                         !! Weight CX rates by ion source density
-                        states=rates*fast_ion%weight/nphi
+                        states=rates*fast_ion%weight/ngamma
 
                         !! Attenuate states as the particle move through plasma
                         !!! What if it attenuates too much?
@@ -9332,6 +9332,7 @@ subroutine npa_mc
 
                         !! Store NPA Flux
                         flux = (dtheta/(2*pi))*sum(states)*beam_grid%dv
+                        print*,'ir = ',ir,'nrange = ',nrange,'Flux = ',flux
                         spread_loop: do it=1,25
                             theta = gyrange(1,ir) + (it-0.5)*dtheta/25
                             call gyro_trajectory(gs, theta, ri, vi)
@@ -9358,17 +9359,17 @@ subroutine npa_mc
 
                 !! Check if particle hits a NPA detector
                 call hit_npa_detector(ri, vi ,det, rf)
-                if(det.eq.0) cycle phi_loop
+                if(det.eq.0) cycle gamma_loop
 
                 !! Get beam grid indices at ri
                 call get_indices(ri,ind)
 
                 !! Calculate CX probability with beam and halo neutrals
                 call get_beam_cx_rate(ind,ri,vi,beam_ion,neut_types,rates)
-                if(sum(rates).le.0.) cycle phi_loop
+                if(sum(rates).le.0.) cycle gamma_loop
 
                 !! Weight CX rates by ion source density
-                states=rates*fast_ion%weight/nphi
+                states=rates*fast_ion%weight/ngamma
 
                 !! Attenuate states as the particle moves though plasma
                 call attenuate(ri,rf,vi,states)
@@ -9377,7 +9378,7 @@ subroutine npa_mc
                 flux = sum(states)*beam_grid%dv
                 call store_npa(det,ri,rf,vi,flux,fast_ion%class)
             endif
-        enddo phi_loop
+        enddo gamma_loop
     enddo loop_over_fast_ions
     !$OMP END PARALLEL DO
 
@@ -9395,7 +9396,7 @@ end subroutine npa_mc
 
 subroutine pnpa_mc
     !+ Calculate Passive NPA flux using a Monte Carlo fast-ion distribution
-    integer :: iion,iphi,nphi,npart
+    integer :: iion,igamma,ngamma,npart
     type(FastIon) :: fast_ion
     real(Float64) :: phi,theta,dtheta
     real(Float64), dimension(3) :: ri, rf, rg, vi
@@ -9412,18 +9413,18 @@ subroutine pnpa_mc
     real(Float64) :: s,c
     real(Float64), dimension(1) :: randomu
 
-    nphi = ceiling(dble(inputs%n_pnpa)/particles%nparticle)
+    ngamma = ceiling(dble(inputs%n_pnpa)/particles%nparticle)
     if(inputs%verbose.ge.1) then
-        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*nphi,Int64)
+        write(*,'(T6,"# of markers: ",i9)') int(particles%nparticle*ngamma,Int64)
     endif
 
-    !$OMP PARALLEL DO schedule(guided) private(iion,iphi,ind,fast_ion,vi,ri,rf,phi,s,c,ir,it,plasma, &
+    !$OMP PARALLEL DO schedule(guided) private(iion,igamma,ind,fast_ion,vi,ri,rf,phi,s,c,ir,it,plasma, &
     !$OMP& randomu,rg,fields,uvw,uvw_vi,rates,states,flux,det,ichan,gs,nrange,gyrange,theta,dtheta)
     loop_over_fast_ions: do iion=istart,particles%nparticle,istep
         fast_ion = particles%fast_ion(iion)
         if(fast_ion%vabs.eq.0) cycle loop_over_fast_ions
         if(.not.fast_ion%cross_grid) cycle loop_over_fast_ions
-        phi_loop: do iphi=1,nphi
+        gamma_loop: do igamma=1,ngamma
             if(particles%axisym) then
                 !! Pick random toroidal angle
                 call randu(randomu)
@@ -9431,7 +9432,8 @@ subroutine pnpa_mc
             else
                 phi = fast_ion%phi
             endif
-            s = sin(phi) ; c = cos(phi)
+            s = sin(phi)
+            c = cos(phi)
 
             !! Calculate position in machine coordinates
             uvw(1) = fast_ion%r*c
@@ -9475,7 +9477,7 @@ subroutine pnpa_mc
                         if(sum(rates).le.0.) cycle gyro_range_loop
 
                         !! Weight CX rates by ion source density
-                        states=rates*fast_ion%weight/nphi
+                        states=rates*fast_ion%weight/ngamma
 
                         !! Attenuate states as the particle move through plasma
                         call attenuate(ri,rf,vi,states)
@@ -9508,7 +9510,7 @@ subroutine pnpa_mc
 
                 !! Check if particle hits a NPA detector
                 call hit_npa_detector(ri, vi ,det, rf)
-                if(det.eq.0) cycle phi_loop
+                if(det.eq.0) cycle gamma_loop
 
                 !! Get beam grid indices at ri
                 call get_indices(ri,ind)
@@ -9516,10 +9518,10 @@ subroutine pnpa_mc
                 !! Calculate CX probability with beam and halo neutrals
                 call get_plasma(plasma, pos=ri)
                 call bt_cx_rates(plasma, plasma%denn, vi, beam_ion, rates)
-                if(sum(rates).le.0.) cycle phi_loop
+                if(sum(rates).le.0.) cycle gamma_loop
 
                 !! Weight CX rates by ion source density
-                states=rates*fast_ion%weight/nphi
+                states=rates*fast_ion%weight/ngamma
 
                 !! Attenuate states as the particle moves though plasma
                 call attenuate(ri,rf,vi,states)
@@ -9528,7 +9530,7 @@ subroutine pnpa_mc
                 flux = sum(states)*beam_grid%dv
                 call store_npa(det,ri,rf,vi,flux,fast_ion%class,passive=.True.)
             endif
-        enddo phi_loop
+        enddo gamma_loop
     enddo loop_over_fast_ions
     !$OMP END PARALLEL DO
 

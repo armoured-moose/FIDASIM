@@ -2541,6 +2541,7 @@ subroutine read_equilibrium
     real(Float64), dimension(3) :: vi, random3
     integer :: error
     integer :: n = 50
+    logical :: path_valid
 
     integer, dimension(:,:,:), allocatable :: p_mask, f_mask
     real(Float64), dimension(:,:,:), allocatable :: denn3d
@@ -2557,7 +2558,12 @@ subroutine read_equilibrium
     !!Read in interpolation grid
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nr", inter_grid%nr, error)
     call h5ltread_dataset_int_scalar_f(gid, "/plasma/nz", inter_grid%nz, error)
-    call h5ltread_dataset_int_scalar_f(gid, "/plasma/nphi", inter_grid%nphi, error)
+    call h5ltpath_valid_f(gid, "/plasma/nphi", .True., path_valid, error)
+    if(path_valid) then
+        call h5ltread_dataset_int_scalar_f(gid, "/plasma/nphi", inter_grid%nphi, error)
+    else
+        inter_grid%nphi = 1
+    endif 
     inter_grid%dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 
     allocate(inter_grid%r(inter_grid%nr),inter_grid%z(inter_grid%nz),inter_grid%phi(inter_grid%nphi))
@@ -2570,7 +2576,12 @@ subroutine read_equilibrium
     dims = [inter_grid%nr, inter_grid%nz, inter_grid%nphi]
 
     call h5ltread_dataset_double_f(gid, "/plasma/r", inter_grid%r, dims(1:1), error)
-    call h5ltread_dataset_double_f(gid, "/plasma/phi", inter_grid%phi, dims(3:3), error)
+    call h5ltpath_valid_f(gid, "/plasma/phi", .True., path_valid, error)
+    if(path_valid) then
+        call h5ltread_dataset_double_f(gid, "/plasma/phi", inter_grid%phi, dims(3:3), error)
+    else
+        inter_grid%nphi = 1
+    endif 
     call h5ltread_dataset_double_f(gid, "/plasma/z", inter_grid%z, dims(2:2), error)
     call h5ltread_dataset_double_f(gid, "/plasma/r2d", inter_grid%r2d, dims, error)
     call h5ltread_dataset_double_f(gid, "/plasma/z2d", inter_grid%z2d, dims, error)
@@ -2710,6 +2721,7 @@ subroutine read_f(fid, error)
     integer(HSIZE_T), dimension(5) :: dims
     real(Float64) :: dummy(1)
     integer :: ir
+    logical :: path_valid
 
     if(inputs%verbose.ge.1) then
         write(*,'(a)') '---- Fast-ion distribution settings ----'
@@ -2719,7 +2731,12 @@ subroutine read_f(fid, error)
     call h5ltread_dataset_int_scalar_f(fid,"/npitch", fbm%npitch, error)
     call h5ltread_dataset_int_scalar_f(fid,"/nr", fbm%nr, error)
     call h5ltread_dataset_int_scalar_f(fid,"/nz", fbm%nz, error)
-    call h5ltread_dataset_int_scalar_f(fid,"/nphi", fbm%nphi, error)
+    call h5ltpath_valid_f(fid, "/nphi", .True., path_valid, error)
+    if(path_valid) then
+        call h5ltread_dataset_int_scalar_f(fid,"/nphi", fbm%nphi, error)
+    else
+        fbm%nphi = 1
+    endif 
 
     if(((fbm%nr.ne.inter_grid%nr).or.(fbm%nz.ne.inter_grid%nz)).or.(fbm%nphi.ne.inter_grid%nphi)) then
         if(inputs%verbose.ge.0) then
@@ -2751,7 +2768,12 @@ subroutine read_f(fid, error)
     call h5ltread_dataset_double_f(fid, "/pitch", fbm%pitch, dims(2:2), error)
     call h5ltread_dataset_double_f(fid, "/r", fbm%r, dims(3:3), error)
     call h5ltread_dataset_double_f(fid, "/z", fbm%z, dims(4:4), error)
-    call h5ltread_dataset_double_f(fid, "/phi", fbm%phi, dims(5:5), error)
+    call h5ltpath_valid_f(fid, "/phi", .True., path_valid, error)
+    if(path_valid) then
+        call h5ltread_dataset_double_f(fid, "/phi", fbm%phi, dims(5:5), error)
+    else
+        fbm%phi = 0.d0
+    endif 
 
 !!! I need to do something with denf
     equil%plasma%denf = fbm%denf
@@ -2927,9 +2949,6 @@ subroutine read_mc(fid, error)
     !$OMP END PARALLEL DO
 
     num = count(particles%fast_ion%cross_grid)
-    print*, "Cross grid =",num/dble(particles%nparticle)*100d0,"%"
-    print*, "Size = ",size(particles%fast_ion%cross_grid)
-    print*, "Axisymm = ",particles%axisym
     if(num.le.0) then
         if(inputs%verbose.ge.0) then
             write(*,'(a)') 'READ_MC: No mc particles in beam grid'
@@ -3790,10 +3809,14 @@ subroutine write_npa
 
     !! Active
     allocate(dcount(npa_chords%nchan))
-    do i=1,npa_chords%nchan
-        dcount(i) = count(npa%part%detector.eq.i)
-    enddo
     npart = npa%npart
+    if(npart.gt.0) then
+        do i=1,npa_chords%nchan
+            dcount(i) = count(npa%part%detector.eq.i)
+        enddo
+    else
+        dcount = 0
+    endif
 
 #ifdef _MPI
     call co_sum(dcount)
@@ -3925,10 +3948,14 @@ subroutine write_npa
 
     !! Passive
     allocate(dcount(npa_chords%nchan))
-    do i=1,npa_chords%nchan
-        dcount(i) = count(pnpa%part%detector.eq.i)
-    enddo
     npart = pnpa%npart
+    if(npart.gt.0) then
+        do i=1,npa_chords%nchan
+            dcount(i) = count(pnpa%part%detector.eq.i)
+        enddo
+    else
+        dcount = 0
+    endif
 
 #ifdef _MPI
     call co_sum(dcount)
@@ -8898,7 +8925,6 @@ subroutine fida_mc
                 call colrad(plasma,beam_ion, vi, tracks(jj)%time, states, denn, photons)
 
                 call store_fida_photons(tracks(jj)%pos, vi, photons, fast_ion%class)
-!!!                print*, 'photons stored = ',photons, ' jj = ',jj,'ntrack =', ntrack
             enddo loop_along_track
         enddo gamma_loop
     enddo loop_over_fast_ions
@@ -9320,7 +9346,6 @@ subroutine npa_mc
 
                         !! Calculate CX probability with beam and halo neutrals
                         call get_beam_cx_rate(ind,ri,vi,beam_ion,neut_types,rates)
-                        print*,'ir = ',ir,'nrange = ',nrange
                         if(sum(rates).le.0.) cycle gyro_range_loop
 
                         !! Weight CX rates by ion source density
@@ -9332,7 +9357,6 @@ subroutine npa_mc
 
                         !! Store NPA Flux
                         flux = (dtheta/(2*pi))*sum(states)*beam_grid%dv
-                        print*,'ir = ',ir,'nrange = ',nrange,'Flux = ',flux
                         spread_loop: do it=1,25
                             theta = gyrange(1,ir) + (it-0.5)*dtheta/25
                             call gyro_trajectory(gs, theta, ri, vi)
